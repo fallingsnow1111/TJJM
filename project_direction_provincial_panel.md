@@ -27,16 +27,20 @@
 
 当前状态：
 - 已对齐为省级：CO2
-- 当前为国家级代理：GDP、Population、Energy、Industry、Urbanization
+- 已补充为省级数据文件：GDP、Population
+- 当前仍为国家级口径：Urbanization（城镇化率）
+- 当前仍缺省级有效面板：Energy、Industry、Urbanization
+
+说明：
+- 现有 [Dataset/能源相关/省级能源清单/省级能源清单_2022.xlsx](Dataset/能源相关/省级能源清单/省级能源清单_2022.xlsx) 仅覆盖 2022 年，尚不足以支撑 2001-2022 连续省级面板。
 
 急需补齐（第一优先级）：
-- 省级 GDP
-- 省级 Population
+- 省级 Energy（至少覆盖 2001-2022）
+- 省级 Industry（第二产业占比，至少覆盖 2001-2022）
 
 随后补齐（第二优先级）：
-- 省级 Energy
-- 省级 Industry
-- 省级 Urbanization
+- 省级 Urbanization（至少覆盖 2001-2022）
+- 省级 Energy mix（煤炭占比/清洁能源占比，可选增强）
 
 ## 4. 统一主表目标结构
 
@@ -58,8 +62,8 @@
 
 ## 5. 执行顺序（落地）
 
-- 第一步：补齐省级 GDP 与省级 Population。
-- 第二步：补齐省级 Energy、Industry、Urbanization。
+- 第一步：将省级 GDP 与省级 Population 接入预处理并替换 national proxy。
+- 第二步：补齐省级 Energy、Industry、Urbanization（2001-2022 连续覆盖）。
 - 第三步：重建统一省级主表并做口径一致性审计。
 - 第四步：运行 LMDI 分解。
 - 第五步：运行省级面板回归（固定效应模型）。

@@ -1,1 +1,608 @@
-import sys
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, cast
+
+import numpy as np
+import pandas as pd
+from openpyxl import load_workbook
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATASET_ROOT = PROJECT_ROOT / "Dataset"
+SUMMARY_JSON = PROJECT_ROOT / "Code" / "dataset_index_summary.json"
+OUT_DIR = PROJECT_ROOT / "Code" / "output"
+
+
+# Canonical province names aligned to inventory/MEIC naming.
+PROVINCE_ALIAS = {
+	"beijing": "Beijing",
+	"tianjin": "Tianjin",
+	"hebei": "Hebei",
+	"shanxi": "Shanxi",
+	"innermongolia": "InnerMongolia",
+	"liaoning": "Liaoning",
+	"jilin": "Jilin",
+	"heilongjiang": "Heilongjiang",
+	"shanghai": "Shanghai",
+	"jiangsu": "Jiangsu",
+	"zhejiang": "Zhejiang",
+	"anhui": "Anhui",
+	"fujian": "Fujian",
+	"jiangxi": "Jiangxi",
+	"shandong": "Shandong",
+	"henan": "Henan",
+	"hubei": "Hubei",
+	"hunan": "Hunan",
+	"guangdong": "Guangdong",
+	"guangxi": "Guangxi",
+	"hainan": "Hainan",
+	"chongqing": "Chongqing",
+	"sichuan": "Sichuan",
+	"guizhou": "Guizhou",
+	"yunnan": "Yunnan",
+	"shaanxi": "Shaanxi",
+	"gansu": "Gansu",
+	"qinghai": "Qinghai",
+	"ningxia": "Ningxia",
+	"xinjiang": "Xinjiang",
+	# Common variants
+	"innermongoliaautonomousregion": "InnerMongolia",
+	"innermongoliaregion": "InnerMongolia",
+}
+
+
+@dataclass
+class VariableSeries:
+	name: str
+	source: str
+	data: pd.DataFrame
+
+
+def load_dataset_index() -> List[dict]:
+	payload = json.loads(SUMMARY_JSON.read_text(encoding="utf-8"))
+	return payload["items"]
+
+
+def ensure_output_dir() -> None:
+	OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def normalize_province_name(name: str) -> Optional[str]:
+	if not isinstance(name, str):
+		return None
+	compact = re.sub(r"[^A-Za-z]", "", name).lower()
+	return PROVINCE_ALIAS.get(compact)
+
+
+def extract_year_from_text(text: str) -> Optional[int]:
+	if not isinstance(text, str):
+		return None
+	m = re.search(r"(19\d{2}|20\d{2})", text)
+	return int(m.group(1)) if m else None
+
+
+def parse_year_cell(v) -> Optional[int]:
+	if isinstance(v, (int, float)):
+		iv = int(v)
+		if 1900 <= iv <= 2100:
+			return iv
+	elif isinstance(v, str):
+		return extract_year_from_text(v)
+	return None
+
+
+def find_header_row(ws) -> int:
+	max_row = ws.max_row or 0
+	max_col = ws.max_column or 0
+	scan_rows = min(max_row, 15)
+
+	best_row = 1
+	best_year_hits = -1
+
+	# Primary strategy: row with the largest count of year-like columns is the header row.
+	for ridx in range(1, scan_rows + 1):
+		hits = 0
+		for c in range(2, max_col + 1):
+			if parse_year_cell(ws.cell(row=ridx, column=c).value) is not None:
+				hits += 1
+		if hits > best_year_hits:
+			best_year_hits = hits
+			best_row = ridx
+
+	if best_year_hits >= 5:
+		return best_row
+
+	# Fallback strategy for non-standard templates.
+	for ridx in range(1, min(max_row, 25) + 1):
+		val = ws.cell(row=ridx, column=1).value
+		if isinstance(val, str) and val.strip() == "指标":
+			return ridx
+
+	return 1
+
+
+def parse_year_headers(ws, header_row: int) -> Dict[int, int]:
+	year_to_col: Dict[int, int] = {}
+	max_col = ws.max_column or 0
+	for col in range(2, max_col + 1):
+		v = ws.cell(row=header_row, column=col).value
+		year = None
+		year = parse_year_cell(v)
+		if year is not None:
+			year_to_col[year] = col
+	return year_to_col
+
+
+def to_float(v) -> Optional[float]:
+	if v is None:
+		return None
+	if isinstance(v, (int, float, np.number)):
+		return float(v)
+	if isinstance(v, str):
+		s = v.strip().replace(",", "")
+		if not s:
+			return None
+		try:
+			return float(s)
+		except ValueError:
+			return None
+	return None
+
+
+def read_inventory_co2_nbs(items: List[dict]) -> pd.DataFrame:
+	records: List[dict] = []
+
+	inventory_files = sorted(
+		[
+			x["path"]
+			for x in items
+			if x.get("sheet_count") == 31 and "2001-2022" in x["path"]
+		]
+	)
+
+	for path_str in inventory_files:
+		year = extract_year_from_text(Path(path_str).name)
+		if year is None:
+			continue
+
+		wb = load_workbook(path_str, read_only=True, data_only=True)
+		for sheet_name in wb.sheetnames:
+			if str(sheet_name).upper() == "NOTE":
+				continue
+
+			province = normalize_province_name(sheet_name)
+			if not province:
+				continue
+
+			ws = wb[sheet_name]
+			max_row = ws.max_row or 0
+			max_col = ws.max_column or 0
+			if max_row < 4 or max_col < 5:
+				continue
+
+			header = [ws.cell(row=1, column=c).value for c in range(1, max_col + 1)]
+			header_norm = [str(h).strip() if h is not None else "" for h in header]
+
+			try:
+				total_row = None
+				for r in range(2, max_row + 1):
+					v = ws.cell(row=r, column=1).value
+					if isinstance(v, str) and v.strip() == "TotalEmissions":
+						total_row = r
+						break
+				if total_row is None:
+					continue
+
+				if "Scope_1_Total" in header_norm:
+					cidx = header_norm.index("Scope_1_Total") + 1
+					co2 = to_float(ws.cell(row=total_row, column=cidx).value)
+				else:
+					# Fallback: sum known fuel/process columns in the total row.
+					cols = [
+						i + 1
+						for i, h in enumerate(header_norm)
+						if h
+						and h
+						not in {
+							"Emission_Inventory",
+							"unit",
+						}
+						and not h.startswith("Scope_2")
+					]
+					vals = [to_float(ws.cell(row=total_row, column=c).value) for c in cols]
+					co2 = float(np.nansum([v for v in vals if v is not None])) if vals else None
+
+				if co2 is None:
+					continue
+
+				records.append(
+					{
+						"province": province,
+						"year": int(year),
+						"CO2": float(co2),
+						"CO2_source": "NBS_2001_2022_inventory",
+						"CO2_source_priority": 1,
+					}
+				)
+			except Exception:
+				continue
+
+	return pd.DataFrame(records)
+
+
+def read_meic_co2(items: List[dict]) -> pd.DataFrame:
+	meic_path = next((x["path"] for x in items if "MEIC" in x["path"]), None)
+	if not meic_path:
+		return pd.DataFrame(columns=["province", "year", "CO2", "CO2_source", "CO2_source_priority"])
+
+	raw = pd.read_excel(meic_path, sheet_name="MEIC-China-CO2 total emissions", header=8)
+	raw = raw.rename(columns={"Province": "province_raw", "Sector": "sector"})
+	raw = raw[raw["sector"].astype(str).str.lower() == "total"].copy()
+
+	year_cols = [c for c in raw.columns if isinstance(c, (int, float)) and 1900 <= int(c) <= 2100]
+	if not year_cols:
+		return pd.DataFrame(columns=["province", "year", "CO2", "CO2_source", "CO2_source_priority"])
+
+	long_df = raw.melt(
+		id_vars=["province_raw"],
+		value_vars=year_cols,
+		var_name="year",
+		value_name="CO2",
+	)
+	long_df["year"] = long_df["year"].astype(int)
+	long_df = long_df[(long_df["year"] >= 1990) & (long_df["year"] <= 2000)]
+	long_df["province"] = long_df["province_raw"].map(normalize_province_name)
+	long_df["CO2"] = pd.to_numeric(long_df["CO2"], errors="coerce")
+	long_df = long_df.dropna(subset=["province", "CO2"])
+
+	out = long_df[["province", "year", "CO2"]].copy()
+	out["CO2_source"] = "MEIC_1990_2000"
+	out["CO2_source_priority"] = 2
+	return out
+
+
+def build_co2_panel(items: List[dict]) -> pd.DataFrame:
+	nbs = read_inventory_co2_nbs(items)
+	meic = read_meic_co2(items)
+	combo = pd.concat([nbs, meic], ignore_index=True)
+
+	combo = combo.sort_values(["province", "year", "CO2_source_priority"]).drop_duplicates(
+		subset=["province", "year"],
+		keep="first",
+	)
+	combo = combo[(combo["year"] >= 1990) & (combo["year"] <= 2022)].copy()
+
+	return combo.sort_values(["province", "year"]).reset_index(drop=True)
+
+
+def select_single_sheet_path(items: List[dict], keyword: str) -> Optional[str]:
+	for it in items:
+		if it.get("sheet_count") == 1 and keyword in it["path"]:
+			return it["path"]
+	return None
+
+
+def read_national_series(
+	path_str: str,
+	variable_name: str,
+	source_name: str,
+	indicator_keywords: Iterable[str],
+) -> VariableSeries:
+	wb = load_workbook(path_str, read_only=True, data_only=True)
+	ws = wb[wb.sheetnames[0]]
+	header_row = find_header_row(ws)
+	year_cols = parse_year_headers(ws, header_row)
+
+	target_row = None
+	max_row = ws.max_row or 0
+	candidates: List[tuple] = []
+	for ridx in range(header_row + 1, max_row + 1):
+		label = ws.cell(row=ridx, column=1).value
+		if not isinstance(label, str):
+			continue
+		label = label.strip()
+		if not label:
+			continue
+
+		vals = [to_float(ws.cell(row=ridx, column=c).value) for c in year_cols.values()]
+		non_null = sum(v is not None for v in vals)
+		numeric_vals = [v for v in vals if v is not None]
+		std = float(np.std(numeric_vals)) if len(numeric_vals) >= 2 else 0.0
+
+		if any(k in label for k in indicator_keywords):
+			# Rank by coverage first, then by variability to avoid selecting all-100 total rows.
+			candidates.append((non_null, std, ridx))
+
+	if candidates:
+		candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+		target_row = candidates[0][2]
+
+	if target_row is None:
+		# Fallback: first non-empty numeric row after header.
+		for ridx in range(header_row + 1, max_row + 1):
+			label = ws.cell(row=ridx, column=1).value
+			if not isinstance(label, str) or not label.strip():
+				continue
+			vals = [to_float(ws.cell(row=ridx, column=c).value) for c in year_cols.values()]
+			if any(v is not None for v in vals):
+				target_row = ridx
+				break
+
+	rows: List[dict] = []
+	if target_row is not None:
+		for year, col in sorted(year_cols.items()):
+			rows.append({"year": int(year), variable_name: to_float(ws.cell(row=target_row, column=col).value)})
+
+	df = pd.DataFrame(rows, columns=["year", variable_name])
+	if not df.empty:
+		df = cast(pd.DataFrame, df.loc[(df["year"] >= 1990) & (df["year"] <= 2022), :].copy())
+	return VariableSeries(name=variable_name, source=source_name, data=cast(pd.DataFrame, df))
+
+
+def build_national_controls(items: List[dict]) -> List[VariableSeries]:
+	# National proxies are used because province-level GDP/Population/Industry/Urbanization
+	# are not currently present in the workspace datasets.
+	gdp_path = select_single_sheet_path(items, "GDP")
+
+	population_path = None
+	urban_path = None
+	industry_path = None
+	energy_path = None
+
+	for it in items:
+		if it.get("sheet_count") != 1:
+			continue
+		path = it["path"]
+		max_row = (it.get("sheets") or [{}])[0].get("max_row")
+		max_col = (it.get("sheets") or [{}])[0].get("max_col")
+
+		if max_col == 49 and max_row == 10 and "GDP" not in path:
+			population_path = population_path or path
+		if max_col == 49 and max_row == 5:
+			urban_path = urban_path or path
+		if max_col == 49 and max_row == 8 and "GDP" not in path:
+			industry_path = industry_path or path
+		if max_col == 49 and max_row == 18:
+			energy_path = energy_path or path
+
+	series_list: List[VariableSeries] = []
+	if gdp_path:
+		series_list.append(
+			read_national_series(
+				gdp_path,
+				variable_name="GDP",
+				source_name="National_macro_GDP",
+				indicator_keywords=["国民总收入", "国内生产总值", "GDP"],
+			)
+		)
+	if population_path:
+		series_list.append(
+			read_national_series(
+				population_path,
+				variable_name="Population",
+				source_name="National_macro_Population",
+				indicator_keywords=["年末总人口"],
+			)
+		)
+		# Prefer computing urbanization from population components when available.
+		series_list.append(
+			read_national_series(
+				population_path,
+				variable_name="UrbanPopulation",
+				source_name="National_macro_UrbanPopulation",
+				indicator_keywords=["城镇人口"],
+			)
+		)
+	if energy_path:
+		series_list.append(
+			read_national_series(
+				energy_path,
+				variable_name="Energy",
+				source_name="National_macro_Energy",
+				indicator_keywords=["能源消费总量", "总量"],
+			)
+		)
+	if industry_path:
+		series_list.append(
+			read_national_series(
+				industry_path,
+				variable_name="Industry",
+				source_name="National_macro_IndustryShare",
+				indicator_keywords=["第二产业"],
+			)
+		)
+	if urban_path:
+		series_list.append(
+			read_national_series(
+				urban_path,
+				variable_name="Urbanization",
+				source_name="National_macro_Urbanization",
+				indicator_keywords=["城镇化率", "城镇"],
+			)
+		)
+
+	return series_list
+
+
+def safe_log(s: pd.Series) -> pd.Series:
+	return np.log(s.where(s > 0))
+
+
+def add_kaya_features(panel: pd.DataFrame) -> pd.DataFrame:
+	df = panel.copy()
+	df["A"] = df["GDP"] / df["Population"]
+	df["B"] = df["Energy"] / df["GDP"]
+	df["C"] = df["CO2"] / df["Energy"]
+
+	df["ln_CO2"] = safe_log(df["CO2"])
+	df["ln_Population"] = safe_log(df["Population"])
+	df["ln_A"] = safe_log(df["A"])
+	df["ln_B"] = safe_log(df["B"])
+	df["ln_C"] = safe_log(df["C"])
+	return df
+
+
+def log_mean(a: float, b: float) -> Optional[float]:
+	if a is None or b is None:
+		return None
+	if a <= 0 or b <= 0:
+		return None
+	if abs(a - b) < 1e-12:
+		return float(a)
+	da = np.log(a)
+	db = np.log(b)
+	if abs(da - db) < 1e-12:
+		return float(a)
+	return float((a - b) / (da - db))
+
+
+def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
+	rows: List[dict] = []
+
+	for province, g in panel.sort_values(["province", "year"]).groupby("province"):
+		g = g.reset_index(drop=True)
+		for i in range(1, len(g)):
+			prev = g.iloc[i - 1]
+			curr = g.iloc[i]
+
+			e0, et = prev["CO2"], curr["CO2"]
+			p0, pt = prev["Population"], curr["Population"]
+			a0, at = prev["A"], curr["A"]
+			b0, bt = prev["B"], curr["B"]
+			c0, ct = prev["C"], curr["C"]
+
+			valid = all(
+				pd.notna(v) and float(v) > 0
+				for v in [e0, et, p0, pt, a0, at, b0, bt, c0, ct]
+			)
+			if not valid:
+				continue
+
+			lm = log_mean(float(et), float(e0))
+			if lm is None:
+				continue
+
+			d_p = lm * np.log(float(pt) / float(p0))
+			d_a = lm * np.log(float(at) / float(a0))
+			d_b = lm * np.log(float(bt) / float(b0))
+			d_c = lm * np.log(float(ct) / float(c0))
+			d_co2 = float(et) - float(e0)
+			resid = d_co2 - (d_p + d_a + d_b + d_c)
+
+			rows.append(
+				{
+					"province": province,
+					"year": int(curr["year"]),
+					"base_year": int(prev["year"]),
+					"delta_CO2": d_co2,
+					"delta_P": d_p,
+					"delta_A": d_a,
+					"delta_B": d_b,
+					"delta_C": d_c,
+					"lmdi_residual": resid,
+				}
+			)
+
+	return pd.DataFrame(rows)
+
+
+def attach_controls(panel: pd.DataFrame, controls: List[VariableSeries]) -> pd.DataFrame:
+	df = panel.copy()
+	for s in controls:
+		if s.data.empty:
+			continue
+		df = df.merge(s.data, on="year", how="left")
+		df[f"{s.name}_source"] = s.source
+		df[f"{s.name}_is_national_proxy"] = 1
+
+	if "Urbanization" not in df.columns:
+		df["Urbanization"] = np.nan
+
+	if "UrbanPopulation" in df.columns and "Population" in df.columns:
+		calc = (df["UrbanPopulation"] / df["Population"]) * 100.0
+		df["Urbanization"] = df["Urbanization"].fillna(calc)
+		if "Urbanization_source" not in df.columns:
+			df["Urbanization_source"] = "Derived_from_National_UrbanPopulation_over_Population"
+			df["Urbanization_is_national_proxy"] = 1
+
+	if "UrbanPopulation" in df.columns:
+		df = df.drop(columns=["UrbanPopulation"], errors="ignore")
+		df = df.drop(columns=["UrbanPopulation_source", "UrbanPopulation_is_national_proxy"], errors="ignore")
+
+	return df
+
+
+def main() -> None:
+	ensure_output_dir()
+	items = load_dataset_index()
+
+	co2_panel = build_co2_panel(items)
+	controls = build_national_controls(items)
+	panel = attach_controls(co2_panel, controls)
+	panel = add_kaya_features(panel)
+
+	core_cols = [
+		"province",
+		"year",
+		"CO2",
+		"GDP",
+		"Population",
+		"Energy",
+		"Industry",
+		"Urbanization",
+		"A",
+		"B",
+		"C",
+		"CO2_source",
+	]
+	panel_core = cast(pd.DataFrame, panel.loc[:, [c for c in core_cols if c in panel.columns]].copy())
+
+	# Keep rows where CO2 exists; remaining variables are filled by available controls.
+	panel_core = cast(pd.DataFrame, panel_core.sort_values(by="year").sort_values(by="province").reset_index(drop=True))
+
+	lmdi_df = compute_lmdi_time(panel_core)
+
+	panel_path = OUT_DIR / "panel_master.csv"
+	lmdi_path = OUT_DIR / "lmdi_decomposition.csv"
+	audit_path = OUT_DIR / "panel_source_audit.csv"
+	summary_path = OUT_DIR / "panel_build_summary.json"
+
+	panel_core.to_csv(panel_path, index=False, encoding="utf-8-sig")
+	lmdi_df.to_csv(lmdi_path, index=False, encoding="utf-8-sig")
+
+	audit_cols = [c for c in panel.columns if c.endswith("_source") or c.endswith("_is_national_proxy")]
+	panel[["province", "year", "CO2"] + audit_cols].to_csv(audit_path, index=False, encoding="utf-8-sig")
+
+	summary = {
+		"panel_rows": int(len(panel_core)),
+		"province_count": int(panel_core["province"].nunique()),
+		"year_min": int(panel_core["year"].min()) if len(panel_core) else None,
+		"year_max": int(panel_core["year"].max()) if len(panel_core) else None,
+		"co2_source_counts": panel_core["CO2_source"].value_counts(dropna=False).to_dict(),
+		"missing_ratio": {
+			c: float(panel_core[c].isna().mean())
+			for c in ["CO2", "GDP", "Population", "Energy", "Industry", "Urbanization", "A", "B", "C"]
+			if c in panel_core.columns
+		},
+		"notes": [
+			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
+			"GDP/Population/Energy/Industry/Urbanization are currently national proxies merged by year.",
+			"Province-level controls should be added later to run full province FE with time FE.",
+		],
+	}
+	summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+	print("WROTE", panel_path)
+	print("WROTE", lmdi_path)
+	print("WROTE", audit_path)
+	print("WROTE", summary_path)
+	print("PANEL_ROWS", summary["panel_rows"], "PROVINCES", summary["province_count"], "YEARS", summary["year_min"], summary["year_max"])
+	print("CO2_SOURCE_COUNTS", summary["co2_source_counts"])
+
+
+if __name__ == "__main__":
+	main()

@@ -1,0 +1,26 @@
+{
+  "panel_rows": 990,
+  "province_count": 30,
+  "year_min": 1990,
+  "year_max": 2022,
+  "co2_source_counts": {
+    "NBS_2001_2022_inventory": 660,
+    "MEIC_1990_2000": 330
+  },
+  "missing_ratio": {
+    "CO2": 0.0,
+    "GDP": 0.0,
+    "Population": 0.0,
+    "Energy": 0.0,
+    "Industry": 0.0,
+    "Urbanization": 0.0,
+    "A": 0.0,
+    "B": 0.0,
+    "C": 0.0
+  },
+  "notes": [
+    "CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
+    "GDP/Population/Energy/Industry/Urbanization are currently national proxies merged by year.",
+    "Province-level controls should be added later to run full province FE with time FE."
+  ]
+}

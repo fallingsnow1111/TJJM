@@ -18,9 +18,16 @@
     "B": 0.0,
     "C": 0.0
   },
+  "energy_source_counts": {
+    "Provincial_energy_inventory_1997_2022_total_final_consumption_sum": 776,
+    "Provincial_energy_log_linear_fit_extrapolation": 210,
+    "Provincial_energy_log_interpolation": 4
+  },
   "notes": [
     "CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
-    "GDP/Population/Energy/Industry/Urbanization are currently national proxies merged by year.",
+    "Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
+    "If energy still missing after imputation, national proxy fallback is applied.",
+    "GDP/Population/Industry/Urbanization are currently national proxies merged by year.",
     "Province-level controls should be added later to run full province FE with time FE."
   ]
 }

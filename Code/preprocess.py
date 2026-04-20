@@ -279,6 +279,70 @@ def build_co2_panel(items: List[dict]) -> pd.DataFrame:
 	return combo.sort_values(["province", "year"]).reset_index(drop=True)
 
 
+def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
+	records: List[dict] = []
+
+	energy_files = sorted(
+		[
+			x["path"]
+			for x in items
+			if Path(x["path"]).name.startswith("省级能源清单_") and Path(x["path"]).suffix.lower() == ".xlsx"
+		]
+	)
+
+	for path_str in energy_files:
+		year = extract_year_from_text(Path(path_str).name)
+		if year is None or year < 1990 or year > 2022:
+			continue
+
+		wb = load_workbook(path_str, read_only=True, data_only=True)
+		for sheet_name in wb.sheetnames:
+			if str(sheet_name).upper() == "NOTE":
+				continue
+
+			province = normalize_province_name(sheet_name)
+			if not province:
+				continue
+
+			ws = wb[sheet_name]
+			max_row = int(ws.max_row or 0)
+			max_col = int(ws.max_column or 0)
+			if max_row < 3 or max_col < 2:
+				continue
+
+			total_row = None
+			for ridx in range(1, min(max_row, 120) + 1):
+				v = ws.cell(row=ridx, column=1).value
+				if isinstance(v, str) and v.strip().lower() == "total final consumption":
+					total_row = ridx
+					break
+
+			if total_row is None:
+				continue
+
+			vals = [to_float(ws.cell(row=total_row, column=c).value) for c in range(2, max_col + 1)]
+			nums = [float(v) for v in vals if v is not None and np.isfinite(v)]
+			if not nums:
+				continue
+
+			records.append(
+				{
+					"province": province,
+					"year": int(year),
+					"Energy": float(np.nansum(nums)),
+					"Energy_source": "Provincial_energy_inventory_1997_2022_total_final_consumption_sum",
+					"Energy_is_national_proxy": 0,
+				}
+			)
+
+	df = pd.DataFrame(records)
+	if df.empty:
+		return pd.DataFrame(columns=["province", "year", "Energy", "Energy_source", "Energy_is_national_proxy"])
+
+	df = df.sort_values(["province", "year"]).drop_duplicates(subset=["province", "year"], keep="last")
+	return df.reset_index(drop=True)
+
+
 def select_single_sheet_path(items: List[dict], keyword: str) -> Optional[str]:
 	for it in items:
 		if it.get("sheet_count") == 1 and keyword in it["path"]:
@@ -536,13 +600,117 @@ def attach_controls(panel: pd.DataFrame, controls: List[VariableSeries]) -> pd.D
 	return df
 
 
+def fill_energy_with_interpolation_and_fit(panel: pd.DataFrame) -> pd.DataFrame:
+	df = panel.copy()
+	if "Energy" not in df.columns:
+		df["Energy"] = np.nan
+	if "Energy_source" not in df.columns:
+		df["Energy_source"] = np.nan
+	if "Energy_is_national_proxy" not in df.columns:
+		df["Energy_is_national_proxy"] = np.nan
+	if "Energy_is_imputed" not in df.columns:
+		df["Energy_is_imputed"] = 0
+
+	for province, idx in df.groupby("province").groups.items():
+		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
+		sub["Energy"] = pd.to_numeric(sub["Energy"], errors="coerce")
+		sub.loc[sub["Energy"] <= 0, "Energy"] = np.nan
+
+		# 1) In-series interpolation in log space for internal gaps.
+		log_energy = np.log(sub["Energy"].where(sub["Energy"] > 0))
+		log_interp = log_energy.interpolate(method="linear", limit_area="inside")
+		inside_mask = sub["Energy"].isna() & log_interp.notna()
+		if inside_mask.any():
+			sub.loc[inside_mask, "Energy"] = np.exp(log_interp.loc[inside_mask])
+			sub.loc[inside_mask, "Energy_source"] = "Provincial_energy_log_interpolation"
+			sub.loc[inside_mask, "Energy_is_national_proxy"] = 0
+			sub.loc[inside_mask, "Energy_is_imputed"] = 1
+
+		# 2) Extrapolation for leading/trailing gaps using province-specific log-linear fit.
+		remain_mask = sub["Energy"].isna()
+		obs_mask = sub["Energy"].notna() & (sub["Energy"] > 0)
+		if remain_mask.any() and int(obs_mask.sum()) >= 4:
+			x = sub.loc[obs_mask, "year"].astype(float).to_numpy()
+			y = np.log(sub.loc[obs_mask, "Energy"].astype(float).to_numpy())
+			slope, intercept = np.polyfit(x, y, 1)
+			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
+			pred = np.exp(intercept + slope * xm)
+			sub.loc[remain_mask, "Energy"] = pred
+			sub.loc[remain_mask, "Energy_source"] = "Provincial_energy_log_linear_fit_extrapolation"
+			sub.loc[remain_mask, "Energy_is_national_proxy"] = 0
+			sub.loc[remain_mask, "Energy_is_imputed"] = 1
+		elif remain_mask.any() and int(obs_mask.sum()) >= 2:
+			obs = cast(pd.DataFrame, sub.loc[obs_mask, ["year", "Energy"]].sort_values("year").copy())
+			x1 = float(obs.iloc[0]["year"])
+			x2 = float(obs.iloc[1]["year"])
+			y1 = float(obs.iloc[0]["Energy"])
+			y2 = float(obs.iloc[1]["Energy"])
+			slope = (np.log(y2) - np.log(y1)) / (x2 - x1) if abs(x2 - x1) > 0 else 0.0
+			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
+			pred = np.exp(np.log(y1) + slope * (xm - x1))
+			sub.loc[remain_mask, "Energy"] = pred
+			sub.loc[remain_mask, "Energy_source"] = "Provincial_energy_cagr_backcast_extrapolation"
+			sub.loc[remain_mask, "Energy_is_national_proxy"] = 0
+			sub.loc[remain_mask, "Energy_is_imputed"] = 1
+
+		df.loc[sub.index, ["Energy", "Energy_source", "Energy_is_national_proxy", "Energy_is_imputed"]] = sub[
+			["Energy", "Energy_source", "Energy_is_national_proxy", "Energy_is_imputed"]
+		]
+
+	df["Energy"] = pd.to_numeric(df["Energy"], errors="coerce")
+	return df
+
+
 def main() -> None:
 	ensure_output_dir()
 	items = load_dataset_index()
 
 	co2_panel = build_co2_panel(items)
 	controls = build_national_controls(items)
-	panel = attach_controls(co2_panel, controls)
+	energy_proxy_series = next((s for s in controls if s.name == "Energy"), None)
+	non_energy_controls = [s for s in controls if s.name != "Energy"]
+
+	panel = attach_controls(co2_panel, non_energy_controls)
+
+	prov_energy = read_provincial_energy_inventory(items)
+	if not prov_energy.empty:
+		panel = panel.merge(prov_energy, on=["province", "year"], how="left")
+	else:
+		if "Energy" not in panel.columns:
+			panel["Energy"] = np.nan
+		if "Energy_source" not in panel.columns:
+			panel["Energy_source"] = np.nan
+		if "Energy_is_national_proxy" not in panel.columns:
+			panel["Energy_is_national_proxy"] = np.nan
+	if "Energy_is_imputed" not in panel.columns:
+		panel["Energy_is_imputed"] = 0
+
+	panel = fill_energy_with_interpolation_and_fit(panel)
+
+	if energy_proxy_series is not None and not energy_proxy_series.data.empty:
+		energy_proxy_df = energy_proxy_series.data.rename(columns={"Energy": "Energy_proxy"})
+		panel = panel.merge(energy_proxy_df, on="year", how="left")
+
+		if "Energy" not in panel.columns:
+			panel["Energy"] = np.nan
+		if "Energy_source" not in panel.columns:
+			panel["Energy_source"] = np.nan
+		if "Energy_is_national_proxy" not in panel.columns:
+			panel["Energy_is_national_proxy"] = np.nan
+
+		missing_energy = panel["Energy"].isna()
+		panel.loc[missing_energy, "Energy"] = panel.loc[missing_energy, "Energy_proxy"]
+		panel.loc[missing_energy, "Energy_source"] = energy_proxy_series.source
+		panel.loc[missing_energy, "Energy_is_national_proxy"] = 1
+		panel.loc[missing_energy, "Energy_is_imputed"] = 0
+		panel.loc[~missing_energy & panel["Energy"].notna(), "Energy_is_national_proxy"] = panel.loc[
+			~missing_energy & panel["Energy"].notna(), "Energy_is_national_proxy"
+		].fillna(0)
+
+		panel = panel.drop(columns=["Energy_proxy"], errors="ignore")
+
+	panel["Energy_is_national_proxy"] = panel["Energy_is_national_proxy"].fillna(0)
+	panel["Energy_is_imputed"] = panel["Energy_is_imputed"].fillna(0)
 	panel = add_kaya_features(panel)
 
 	core_cols = [
@@ -574,7 +742,11 @@ def main() -> None:
 	panel_core.to_csv(panel_path, index=False, encoding="utf-8-sig")
 	lmdi_df.to_csv(lmdi_path, index=False, encoding="utf-8-sig")
 
-	audit_cols = [c for c in panel.columns if c.endswith("_source") or c.endswith("_is_national_proxy")]
+	audit_cols = [
+		c
+		for c in panel.columns
+		if c.endswith("_source") or c.endswith("_is_national_proxy") or c.endswith("_is_imputed")
+	]
 	panel[["province", "year", "CO2"] + audit_cols].to_csv(audit_path, index=False, encoding="utf-8-sig")
 
 	summary = {
@@ -588,9 +760,14 @@ def main() -> None:
 			for c in ["CO2", "GDP", "Population", "Energy", "Industry", "Urbanization", "A", "B", "C"]
 			if c in panel_core.columns
 		},
+		"energy_source_counts": panel["Energy_source"].value_counts(dropna=False).to_dict()
+		if "Energy_source" in panel.columns
+		else {},
 		"notes": [
 			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
-			"GDP/Population/Energy/Industry/Urbanization are currently national proxies merged by year.",
+			"Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
+			"If energy still missing after imputation, national proxy fallback is applied.",
+			"GDP/Population/Industry/Urbanization are currently national proxies merged by year.",
 			"Province-level controls should be added later to run full province FE with time FE.",
 		],
 	}

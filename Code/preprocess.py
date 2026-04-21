@@ -209,7 +209,7 @@ def to_float(v) -> Optional[float]:
 	if isinstance(v, (int, float, np.number)):
 		return float(v)
 	if isinstance(v, str):
-		s = v.strip().replace(",", "")
+		s = v.strip().replace(",", "").replace("%", "")
 		if not s:
 			return None
 		try:
@@ -342,29 +342,22 @@ def align_meic_to_nbs_scale(nbs: pd.DataFrame, meic: pd.DataFrame) -> pd.DataFra
 	if nbs.empty or meic.empty:
 		return meic
 
+	overlap_years = [1998, 1999, 2000]
 	nbs_anchor = nbs[(nbs["year"] >= 2001) & (nbs["year"] <= 2003)]
-	meic_anchor = meic[(meic["year"] >= 1998) & (meic["year"] <= 2000)]
+	meic_anchor = meic[meic["year"].isin(overlap_years)]
 	if nbs_anchor.empty or meic_anchor.empty:
 		return meic
 
-	nbs_mean = nbs_anchor.groupby("province")["CO2"].mean().reset_index(name="CO2_nbs_mean")
-	meic_mean = meic_anchor.groupby("province")["CO2"].mean().reset_index(name="CO2_meic_mean")
-	merge_scale = nbs_mean.merge(meic_mean, on="province", how="inner")
-	merge_scale["scale"] = merge_scale["CO2_nbs_mean"] / merge_scale["CO2_meic_mean"]
-	merge_scale["scale"] = pd.to_numeric(merge_scale["scale"], errors="coerce")
-	merge_scale.loc[~np.isfinite(merge_scale["scale"]) | (merge_scale["scale"] <= 0), "scale"] = np.nan
+	nbs_mean = float(nbs_anchor["CO2"].mean())
+	meic_mean = float(meic_anchor["CO2"].mean())
+	global_scale = nbs_mean / meic_mean if np.isfinite(nbs_mean) and np.isfinite(meic_mean) and meic_mean > 0 else 1.0
+	if not np.isfinite(global_scale) or global_scale <= 0:
+		global_scale = 1.0
 
-	nat_nbs = float(nbs_anchor["CO2"].mean()) if not nbs_anchor.empty else np.nan
-	nat_meic = float(meic_anchor["CO2"].mean()) if not meic_anchor.empty else np.nan
-	national_scale = nat_nbs / nat_meic if (np.isfinite(nat_nbs) and np.isfinite(nat_meic) and nat_meic > 0) else 1.0
-	if not np.isfinite(national_scale) or national_scale <= 0:
-		national_scale = 1.0
-
-	scale_map = merge_scale.set_index("province")["scale"].to_dict()
 	aligned = meic.copy()
-	aligned["CO2_scale_factor"] = aligned["province"].map(scale_map).fillna(national_scale)
-	aligned["CO2"] = aligned["CO2"] * aligned["CO2_scale_factor"]
-	aligned["CO2_source"] = aligned["CO2_source"].astype(str) + "_scaled_to_NBS_anchor"
+	aligned["CO2_scale_factor"] = global_scale
+	aligned["CO2"] = aligned["CO2"] * global_scale
+	aligned["CO2_source"] = aligned["CO2_source"].astype(str) + "_scaled_to_NBS_anchor_global"
 	return aligned
 
 
@@ -656,11 +649,12 @@ def transformed_interpolate_extrapolate_by_province(
 		if remain_mask.any() and int(obs_mask.sum()) >= 4:
 			x = sub.loc[obs_mask, "year"].astype(float).to_numpy()
 			y = _to_transformed(sub.loc[obs_mask, value_col]).astype(float).to_numpy()
-			slope, intercept = np.polyfit(x, y, 1)
 			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
-			pred = _from_transformed(pd.Series(intercept + slope * xm, index=sub.loc[remain_mask].index))
+			degree = 2 if int(obs_mask.sum()) >= 6 else 1
+			coeffs = np.polyfit(x, y, degree)
+			pred = _from_transformed(pd.Series(np.polyval(coeffs, xm), index=sub.loc[remain_mask].index))
 			sub.loc[remain_mask, value_col] = pred
-			sub.loc[remain_mask, source_col] = fit_source
+			sub.loc[remain_mask, source_col] = fit_source if degree == 1 else fit_source + "_quadratic"
 			sub.loc[remain_mask, proxy_flag_col] = 0
 			sub.loc[remain_mask, imputed_col] = 1
 		elif remain_mask.any() and int(obs_mask.sum()) >= 2:
@@ -995,6 +989,7 @@ def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
 					"delta_B": d_b,
 					"delta_C": d_c,
 					"lmdi_residual": resid,
+					"resid_ratio": resid_ratio_abs,
 					"lmdi_residual_abs_ratio": resid_ratio_abs,
 				}
 			)
@@ -1065,41 +1060,62 @@ def allocate_missing_energy_from_national_proxy(panel: pd.DataFrame, source_name
 		if not missing_mask.any():
 			continue
 
-		co2_total = float(df.loc[year_mask, "CO2"].sum(skipna=True))
-		if np.isfinite(co2_total) and co2_total > 0:
-			weights = df.loc[missing_mask, "CO2"] / co2_total
-			weights = weights.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-			weight_sum = float(weights.sum())
+		year_gdp = pd.to_numeric(df.loc[year_mask, "GDP"], errors="coerce")
+		weights = year_gdp.loc[missing_mask]
+		weights = weights.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+		weight_sum = float(weights.sum())
+		if weight_sum > 0:
+			weights = weights / weight_sum
 		else:
 			weights = pd.Series(0.0, index=df.loc[missing_mask].index)
-			weight_sum = 0.0
 
+		observed_sum = float(df.loc[year_mask & df["Energy"].notna(), "Energy"].sum(skipna=True))
+		remaining = nat_energy - observed_sum
+		allocatable = remaining if np.isfinite(remaining) and remaining > 0 else 0.0
 		if weight_sum > 0:
-			observed_sum = float(df.loc[year_mask & df["Energy"].notna(), "Energy"].sum(skipna=True))
-			remaining = nat_energy - observed_sum
-			if np.isfinite(remaining) and remaining > 0:
-				fill_values = remaining * (weights / weight_sum)
-				fill_source = source_name + "_residual_allocated_by_CO2_share"
-			else:
-				fill_values = nat_energy * (weights / weight_sum)
-				fill_source = source_name + "_allocated_by_CO2_share"
-			df.loc[missing_mask, "Energy"] = fill_values.values
-			df.loc[missing_mask, "Energy_source"] = fill_source
-			df.loc[missing_mask, "Energy_is_national_proxy"] = 1
-			df.loc[missing_mask, "Energy_is_imputed"] = 1
+			fill_values = allocatable * weights
+			fill_source = source_name + "_residual_allocated_by_GDP_share"
 		else:
 			count_missing = int(missing_mask.sum())
-			if count_missing <= 0:
-				continue
-			df.loc[missing_mask, "Energy"] = nat_energy / count_missing
-			df.loc[missing_mask, "Energy_source"] = source_name + "_equal_split_fallback"
-			df.loc[missing_mask, "Energy_is_national_proxy"] = 1
-			df.loc[missing_mask, "Energy_is_imputed"] = 1
+			fill_values = pd.Series(allocatable / count_missing if count_missing > 0 else 0.0, index=df.loc[missing_mask].index)
+			fill_source = source_name + "_equal_split_fallback"
+		df.loc[missing_mask, "Energy"] = fill_values.values if hasattr(fill_values, "values") else fill_values
+		df.loc[missing_mask, "Energy_source"] = fill_source
+		df.loc[missing_mask, "Energy_is_national_proxy"] = 1
+		df.loc[missing_mask, "Energy_is_imputed"] = 1
 
 	df["Energy"] = pd.to_numeric(df["Energy"], errors="coerce")
 	df["Energy_is_national_proxy"] = pd.to_numeric(df["Energy_is_national_proxy"], errors="coerce").fillna(0)
 	df["Energy_is_imputed"] = pd.to_numeric(df["Energy_is_imputed"], errors="coerce").fillna(0)
 	return df
+
+
+def validate_unit_scale(panel: pd.DataFrame) -> Dict[str, float]:
+	df = panel.copy()
+	for col in ["CO2", "GDP", "Population", "Energy"]:
+		if col not in df.columns:
+			raise ValueError(f"Missing required column for unit validation: {col}")
+		vals = pd.to_numeric(df[col], errors="coerce").dropna()
+		if vals.empty:
+			raise ValueError(f"No numeric values available for unit validation: {col}")
+
+	means = {
+		col: float(pd.to_numeric(df[col], errors="coerce").mean())
+		for col in ["CO2", "GDP", "Energy"]
+	}
+	energy_over_gdp = means["Energy"] / means["GDP"] if np.isfinite(means["GDP"]) and means["GDP"] > 0 else np.nan
+	co2_over_energy = means["CO2"] / means["Energy"] if np.isfinite(means["Energy"]) and means["Energy"] > 0 else np.nan
+	if not np.isfinite(energy_over_gdp) or not (1e-8 < energy_over_gdp < 1e3):
+		raise ValueError(f"Suspicious unit scale: Energy/GDP mean ratio = {energy_over_gdp}")
+	if not np.isfinite(co2_over_energy) or not (1e-8 < co2_over_energy < 1e3):
+		raise ValueError(f"Suspicious unit scale: CO2/Energy mean ratio = {co2_over_energy}")
+	return {
+		"CO2_mean": means["CO2"],
+		"GDP_mean": means["GDP"],
+		"Energy_mean": means["Energy"],
+		"Energy_over_GDP_mean_ratio": float(energy_over_gdp),
+		"CO2_over_Energy_mean_ratio": float(co2_over_energy),
+	}
 
 
 def collect_unit_consistency_warnings(panel: pd.DataFrame) -> List[str]:
@@ -1125,6 +1141,25 @@ def collect_unit_consistency_warnings(panel: pd.DataFrame) -> List[str]:
 		med = float(vals.median())
 		if med < 1e-8 or med > 1e8:
 			warnings.append(f"Ratio {ratio_col} median out of expected range: {med:.3e}")
+
+	unit_checks = [
+		("Energy", "GDP", 1e-8, 1e2),
+		("CO2", "Energy", 1e-8, 1e2),
+		("CO2", "GDP", 1e-10, 1e2),
+	]
+	for numerator, denominator, lower, upper in unit_checks:
+		if numerator not in panel.columns or denominator not in panel.columns:
+			continue
+		num_mean = float(pd.to_numeric(panel[numerator], errors="coerce").mean())
+		den_mean = float(pd.to_numeric(panel[denominator], errors="coerce").mean())
+		if not np.isfinite(num_mean) or not np.isfinite(den_mean) or den_mean <= 0:
+			warnings.append(f"Invalid unit scale for {numerator}/{denominator}")
+			continue
+		ratio = num_mean / den_mean
+		if ratio < lower or ratio > upper:
+			warnings.append(
+				f"Suspicious unit scale for {numerator}/{denominator}: {ratio:.3e} outside [{lower:.1e}, {upper:.1e}]"
+			)
 
 	return warnings
 
@@ -1212,11 +1247,13 @@ def main() -> None:
 		panel_core.sort_values(by=["year", "province"], kind="mergesort").reset_index(drop=True),
 	)
 
+	unit_diagnostics = validate_unit_scale(panel_core)
 	lmdi_df = compute_lmdi_time(panel_core)
 	unit_warnings = collect_unit_consistency_warnings(panel_core)
 	lmdi_residual_ratio_stats = {}
 	if not lmdi_df.empty and "lmdi_residual_abs_ratio" in lmdi_df.columns:
 		lmdi_residual_ratio_stats = {
+			"mean": float(lmdi_df["lmdi_residual_abs_ratio"].mean()),
 			"median": float(lmdi_df["lmdi_residual_abs_ratio"].median()),
 			"p90": float(lmdi_df["lmdi_residual_abs_ratio"].quantile(0.9)),
 			"max": float(lmdi_df["lmdi_residual_abs_ratio"].max()),
@@ -1243,6 +1280,7 @@ def main() -> None:
 		"year_min": int(panel_core["year"].min()) if len(panel_core) else None,
 		"year_max": int(panel_core["year"].max()) if len(panel_core) else None,
 		"co2_source_counts": panel_core["CO2_source"].value_counts(dropna=False).to_dict(),
+		"unit_diagnostics": unit_diagnostics,
 		"unit_consistency_warnings": unit_warnings,
 		"lmdi_residual_abs_ratio_stats": lmdi_residual_ratio_stats,
 		"missing_ratio": {
@@ -1262,10 +1300,10 @@ def main() -> None:
 		"notes": [
 			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000), and MEIC is scale-aligned to NBS via 1998-2000 vs 2001-2003 anchors.",
 			"Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
-			"If energy is still missing after imputation, national proxy is allocated to missing provinces by CO2 share, instead of direct national total assignment.",
+			"If energy is still missing after imputation, national proxy is allocated to missing provinces by GDP share, instead of direct national total assignment.",
 			"Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and additive national anchor shift for imputed years.",
-			"Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast and additive national anchor shift for imputed years.",
-			"LMDI residual diagnostics are reported in lmdi_residual_abs_ratio and summary stats.",
+			"Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast, optional quadratic extrapolation when data support it, and additive national anchor shift for imputed years.",
+			"LMDI residual diagnostics are reported in resid_ratio, lmdi_residual_abs_ratio, and summary stats.",
 		],
 	}
 	summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

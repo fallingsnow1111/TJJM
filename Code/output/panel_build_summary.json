@@ -23,11 +23,15 @@
     "Provincial_energy_log_linear_fit_extrapolation": 210,
     "Provincial_energy_log_interpolation": 4
   },
+  "industry_source_counts": {
+    "Provincial_industry_share_1996_2024_observed": 809,
+    "Provincial_industry_logit_linear_fit_extrapolation_national_anchor": 181
+  },
   "notes": [
     "CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
     "Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
     "If energy still missing after imputation, national proxy fallback is applied.",
-    "GDP/Population/Industry/Urbanization are currently national proxies merged by year.",
-    "Province-level controls should be added later to run full province FE with time FE."
+    "Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and national year-level anchoring for imputed years.",
+    "Urbanization remains national proxy because currently available provincial urbanization file has sparse early-year coverage."
   ]
 }

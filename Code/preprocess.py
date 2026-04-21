@@ -54,6 +54,69 @@ PROVINCE_ALIAS = {
 	"innermongoliaregion": "InnerMongolia",
 }
 
+ZH_PROVINCE_ALIAS = {
+	"北京": "Beijing",
+	"北京市": "Beijing",
+	"天津": "Tianjin",
+	"天津市": "Tianjin",
+	"河北": "Hebei",
+	"河北省": "Hebei",
+	"山西": "Shanxi",
+	"山西省": "Shanxi",
+	"内蒙古": "InnerMongolia",
+	"内蒙古自治区": "InnerMongolia",
+	"辽宁": "Liaoning",
+	"辽宁省": "Liaoning",
+	"吉林": "Jilin",
+	"吉林省": "Jilin",
+	"黑龙江": "Heilongjiang",
+	"黑龙江省": "Heilongjiang",
+	"上海": "Shanghai",
+	"上海市": "Shanghai",
+	"江苏": "Jiangsu",
+	"江苏省": "Jiangsu",
+	"浙江": "Zhejiang",
+	"浙江省": "Zhejiang",
+	"安徽": "Anhui",
+	"安徽省": "Anhui",
+	"福建": "Fujian",
+	"福建省": "Fujian",
+	"江西": "Jiangxi",
+	"江西省": "Jiangxi",
+	"山东": "Shandong",
+	"山东省": "Shandong",
+	"河南": "Henan",
+	"河南省": "Henan",
+	"湖北": "Hubei",
+	"湖北省": "Hubei",
+	"湖南": "Hunan",
+	"湖南省": "Hunan",
+	"广东": "Guangdong",
+	"广东省": "Guangdong",
+	"广西": "Guangxi",
+	"广西壮族自治区": "Guangxi",
+	"海南": "Hainan",
+	"海南省": "Hainan",
+	"重庆": "Chongqing",
+	"重庆市": "Chongqing",
+	"四川": "Sichuan",
+	"四川省": "Sichuan",
+	"贵州": "Guizhou",
+	"贵州省": "Guizhou",
+	"云南": "Yunnan",
+	"云南省": "Yunnan",
+	"陕西": "Shaanxi",
+	"陕西省": "Shaanxi",
+	"甘肃": "Gansu",
+	"甘肃省": "Gansu",
+	"青海": "Qinghai",
+	"青海省": "Qinghai",
+	"宁夏": "Ningxia",
+	"宁夏回族自治区": "Ningxia",
+	"新疆": "Xinjiang",
+	"新疆维吾尔自治区": "Xinjiang",
+}
+
 
 @dataclass
 class VariableSeries:
@@ -74,6 +137,9 @@ def ensure_output_dir() -> None:
 def normalize_province_name(name: str) -> Optional[str]:
 	if not isinstance(name, str):
 		return None
+	name = name.strip()
+	if name in ZH_PROVINCE_ALIAS:
+		return ZH_PROVINCE_ALIAS[name]
 	compact = re.sub(r"[^A-Za-z]", "", name).lower()
 	return PROVINCE_ALIAS.get(compact)
 
@@ -350,6 +416,16 @@ def select_single_sheet_path(items: List[dict], keyword: str) -> Optional[str]:
 	return None
 
 
+def select_single_sheet_path_by_keywords(items: List[dict], keywords: Iterable[str]) -> Optional[str]:
+	for it in items:
+		if it.get("sheet_count") != 1:
+			continue
+		path = str(it.get("path", ""))
+		if all(k in path for k in keywords):
+			return path
+	return None
+
+
 def read_national_series(
 	path_str: str,
 	variable_name: str,
@@ -408,30 +484,15 @@ def read_national_series(
 
 
 def build_national_controls(items: List[dict]) -> List[VariableSeries]:
-	# National proxies are used because province-level GDP/Population/Industry/Urbanization
-	# are not currently present in the workspace datasets.
-	gdp_path = select_single_sheet_path(items, "GDP")
+	# National proxies remain needed for fallback and anchoring.
+	gdp_path = select_single_sheet_path_by_keywords(items, ["国家维度", "经济相关", "人均GDP"])
+	population_path = select_single_sheet_path_by_keywords(items, ["国家维度", "人口相关", "年末总人口"])
+	urban_path = select_single_sheet_path_by_keywords(items, ["国家维度", "人口相关", "城镇化率"])
+	industry_path = select_single_sheet_path_by_keywords(items, ["国家维度", "经济相关", "三次产业构成"])
+	energy_path = select_single_sheet_path_by_keywords(items, ["国家维度", "能源相关", "能源消费总量"])
 
-	population_path = None
-	urban_path = None
-	industry_path = None
-	energy_path = None
-
-	for it in items:
-		if it.get("sheet_count") != 1:
-			continue
-		path = it["path"]
-		max_row = (it.get("sheets") or [{}])[0].get("max_row")
-		max_col = (it.get("sheets") or [{}])[0].get("max_col")
-
-		if max_col == 49 and max_row == 10 and "GDP" not in path:
-			population_path = population_path or path
-		if max_col == 49 and max_row == 5:
-			urban_path = urban_path or path
-		if max_col == 49 and max_row == 8 and "GDP" not in path:
-			industry_path = industry_path or path
-		if max_col == 49 and max_row == 18:
-			energy_path = energy_path or path
+	if gdp_path is None:
+		gdp_path = select_single_sheet_path(items, "GDP")
 
 	series_list: List[VariableSeries] = []
 	if gdp_path:
@@ -490,6 +551,167 @@ def build_national_controls(items: List[dict]) -> List[VariableSeries]:
 		)
 
 	return series_list
+
+
+def read_provincial_industry_share(items: List[dict]) -> pd.DataFrame:
+	path_str = select_single_sheet_path_by_keywords(items, ["省份维度", "经济相关", "省份第二产业占比"])
+	if not path_str:
+		return pd.DataFrame(columns=["province", "year", "Industry", "Industry_source", "Industry_is_national_proxy"])
+
+	wb = load_workbook(path_str, read_only=True, data_only=True)
+	ws = wb[wb.sheetnames[0]]
+
+	year_cols: Dict[int, int] = {}
+	for col in range(3, int(ws.max_column or 0) + 1):
+		year = parse_year_cell(ws.cell(row=1, column=col).value)
+		if year is not None and 1990 <= int(year) <= 2022:
+			year_cols[int(year)] = col
+
+	if not year_cols:
+		return pd.DataFrame(columns=["province", "year", "Industry", "Industry_source", "Industry_is_national_proxy"])
+
+	records: List[dict] = []
+	for ridx in range(2, int(ws.max_row or 0) + 1):
+		indicator = ws.cell(row=ridx, column=1).value
+		province_raw = ws.cell(row=ridx, column=2).value
+		if not isinstance(indicator, str):
+			continue
+		if not isinstance(province_raw, str):
+			continue
+		if "第二产业" not in indicator or "比重" not in indicator:
+			continue
+
+		province = normalize_province_name(province_raw)
+		if not province:
+			continue
+
+		for year, col in sorted(year_cols.items()):
+			v = to_float(ws.cell(row=ridx, column=col).value)
+			if v is None:
+				continue
+			records.append(
+				{
+					"province": province,
+					"year": int(year),
+					"Industry": float(v),
+					"Industry_source": "Provincial_industry_share_1996_2024_observed",
+					"Industry_is_national_proxy": 0,
+				}
+			)
+
+	df = pd.DataFrame(records)
+	if df.empty:
+		return pd.DataFrame(columns=["province", "year", "Industry", "Industry_source", "Industry_is_national_proxy"])
+
+	df = df.sort_values(["province", "year"]).drop_duplicates(subset=["province", "year"], keep="last")
+	return df.reset_index(drop=True)
+
+
+def fill_industry_with_interpolation_fit_and_anchor(
+	panel: pd.DataFrame,
+	industry_proxy_series: Optional[VariableSeries],
+) -> pd.DataFrame:
+	df = panel.copy()
+	if "Industry" not in df.columns:
+		df["Industry"] = np.nan
+	if "Industry_source" not in df.columns:
+		df["Industry_source"] = np.nan
+	if "Industry_is_national_proxy" not in df.columns:
+		df["Industry_is_national_proxy"] = np.nan
+	if "Industry_is_imputed" not in df.columns:
+		df["Industry_is_imputed"] = 0
+
+	def clip_share(series: pd.Series) -> pd.Series:
+		return series.clip(lower=0.01, upper=99.99)
+
+	for province, idx in df.groupby("province").groups.items():
+		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
+		sub["Industry"] = pd.to_numeric(sub["Industry"], errors="coerce")
+		sub.loc[(sub["Industry"] <= 0) | (sub["Industry"] >= 100), "Industry"] = np.nan
+
+		# 1) In-series interpolation in logit space for internal gaps.
+		base = clip_share(sub["Industry"])
+		logit = np.log(base / (100.0 - base))
+		logit_interp = logit.interpolate(method="linear", limit_area="inside")
+		inside_mask = sub["Industry"].isna() & logit_interp.notna()
+		if inside_mask.any():
+			sub.loc[inside_mask, "Industry"] = 100.0 / (1.0 + np.exp(-logit_interp.loc[inside_mask]))
+			sub.loc[inside_mask, "Industry_source"] = "Provincial_industry_logit_interpolation"
+			sub.loc[inside_mask, "Industry_is_national_proxy"] = 0
+			sub.loc[inside_mask, "Industry_is_imputed"] = 1
+
+		# 2) Extrapolation for leading/trailing gaps using province-specific logit-linear fit.
+		remain_mask = sub["Industry"].isna()
+		obs_mask = sub["Industry"].notna() & (sub["Industry"] > 0) & (sub["Industry"] < 100)
+		if remain_mask.any() and int(obs_mask.sum()) >= 4:
+			x = sub.loc[obs_mask, "year"].astype(float).to_numpy()
+			y_share = clip_share(sub.loc[obs_mask, "Industry"]).astype(float).to_numpy()
+			y = np.log(y_share / (100.0 - y_share))
+			slope, intercept = np.polyfit(x, y, 1)
+			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
+			pred_logit = intercept + slope * xm
+			pred = 100.0 / (1.0 + np.exp(-pred_logit))
+			sub.loc[remain_mask, "Industry"] = pred
+			sub.loc[remain_mask, "Industry_source"] = "Provincial_industry_logit_linear_fit_extrapolation"
+			sub.loc[remain_mask, "Industry_is_national_proxy"] = 0
+			sub.loc[remain_mask, "Industry_is_imputed"] = 1
+		elif remain_mask.any() and int(obs_mask.sum()) >= 2:
+			obs = cast(pd.DataFrame, sub.loc[obs_mask, ["year", "Industry"]].sort_values("year").copy())
+			x1 = float(obs.iloc[0]["year"])
+			x2 = float(obs.iloc[1]["year"])
+			y1_share = float(np.clip(obs.iloc[0]["Industry"], 0.01, 99.99))
+			y2_share = float(np.clip(obs.iloc[1]["Industry"], 0.01, 99.99))
+			y1 = np.log(y1_share / (100.0 - y1_share))
+			y2 = np.log(y2_share / (100.0 - y2_share))
+			slope = (y2 - y1) / (x2 - x1) if abs(x2 - x1) > 0 else 0.0
+			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
+			pred_logit = y1 + slope * (xm - x1)
+			pred = 100.0 / (1.0 + np.exp(-pred_logit))
+			sub.loc[remain_mask, "Industry"] = pred
+			sub.loc[remain_mask, "Industry_source"] = "Provincial_industry_logit_backcast_extrapolation"
+			sub.loc[remain_mask, "Industry_is_national_proxy"] = 0
+			sub.loc[remain_mask, "Industry_is_imputed"] = 1
+
+		df.loc[
+			sub.index,
+			["Industry", "Industry_source", "Industry_is_national_proxy", "Industry_is_imputed"],
+		] = sub[["Industry", "Industry_source", "Industry_is_national_proxy", "Industry_is_imputed"]]
+
+	# 3) National anchoring for imputed rows only (year-level mean calibration).
+	if industry_proxy_series is not None and not industry_proxy_series.data.empty:
+		proxy = industry_proxy_series.data.rename(columns={"Industry": "Industry_national_ref"})
+		df = df.merge(proxy, on="year", how="left")
+
+		for year, idx in df.groupby("year").groups.items():
+			nat_vals = df.loc[list(idx), "Industry_national_ref"].dropna()
+			if nat_vals.empty:
+				continue
+			nat = float(nat_vals.iloc[0])
+			year_mask = df["year"] == year
+			imputed_mask = year_mask & (df["Industry_is_imputed"] == 1) & df["Industry"].notna()
+			if not imputed_mask.any():
+				continue
+			mean_val = float(df.loc[year_mask & df["Industry"].notna(), "Industry"].mean())
+			if not np.isfinite(mean_val) or mean_val <= 0:
+				continue
+			ratio = nat / mean_val
+			df.loc[imputed_mask, "Industry"] = np.clip(df.loc[imputed_mask, "Industry"] * ratio, 0.01, 99.99)
+			df.loc[imputed_mask, "Industry_source"] = (
+				df.loc[imputed_mask, "Industry_source"].astype(str)
+				+ "_national_anchor"
+			)
+
+		missing_industry = df["Industry"].isna()
+		df.loc[missing_industry, "Industry"] = df.loc[missing_industry, "Industry_national_ref"]
+		df.loc[missing_industry, "Industry_source"] = industry_proxy_series.source
+		df.loc[missing_industry, "Industry_is_national_proxy"] = 1
+		df.loc[missing_industry, "Industry_is_imputed"] = 0
+		df = df.drop(columns=["Industry_national_ref"], errors="ignore")
+
+	df["Industry"] = pd.to_numeric(df["Industry"], errors="coerce")
+	df["Industry_is_national_proxy"] = df["Industry_is_national_proxy"].fillna(0)
+	df["Industry_is_imputed"] = df["Industry_is_imputed"].fillna(0)
+	return df
 
 
 def safe_log(s: pd.Series) -> pd.Series:
@@ -668,9 +890,25 @@ def main() -> None:
 	co2_panel = build_co2_panel(items)
 	controls = build_national_controls(items)
 	energy_proxy_series = next((s for s in controls if s.name == "Energy"), None)
-	non_energy_controls = [s for s in controls if s.name != "Energy"]
+	industry_proxy_series = next((s for s in controls if s.name == "Industry"), None)
+	non_energy_controls = [s for s in controls if s.name not in {"Energy", "Industry"}]
 
 	panel = attach_controls(co2_panel, non_energy_controls)
+
+	prov_industry = read_provincial_industry_share(items)
+	if not prov_industry.empty:
+		panel = panel.merge(prov_industry, on=["province", "year"], how="left")
+	else:
+		if "Industry" not in panel.columns:
+			panel["Industry"] = np.nan
+		if "Industry_source" not in panel.columns:
+			panel["Industry_source"] = np.nan
+		if "Industry_is_national_proxy" not in panel.columns:
+			panel["Industry_is_national_proxy"] = np.nan
+	if "Industry_is_imputed" not in panel.columns:
+		panel["Industry_is_imputed"] = 0
+
+	panel = fill_industry_with_interpolation_fit_and_anchor(panel, industry_proxy_series)
 
 	prov_energy = read_provincial_energy_inventory(items)
 	if not prov_energy.empty:
@@ -763,12 +1001,15 @@ def main() -> None:
 		"energy_source_counts": panel["Energy_source"].value_counts(dropna=False).to_dict()
 		if "Energy_source" in panel.columns
 		else {},
+		"industry_source_counts": panel["Industry_source"].value_counts(dropna=False).to_dict()
+		if "Industry_source" in panel.columns
+		else {},
 		"notes": [
 			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
 			"Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
 			"If energy still missing after imputation, national proxy fallback is applied.",
-			"GDP/Population/Industry/Urbanization are currently national proxies merged by year.",
-			"Province-level controls should be added later to run full province FE with time FE.",
+			"Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and national year-level anchoring for imputed years.",
+			"Urbanization remains national proxy because currently available provincial urbanization file has sparse early-year coverage.",
 		],
 	}
 	summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

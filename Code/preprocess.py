@@ -583,6 +583,57 @@ def build_national_controls(items: List[dict]) -> List[VariableSeries]:
 	return series_list
 
 
+def read_provincial_wide_series(
+	items: List[dict],
+	path_keywords: Iterable[str],
+	variable_name: str,
+	source_name: str,
+) -> VariableSeries:
+	path_str = select_single_sheet_path_by_keywords(items, path_keywords)
+	if not path_str:
+		return VariableSeries(name=variable_name, source=source_name, data=pd.DataFrame(columns=["province", "year", variable_name]))
+
+	wb = load_workbook(path_str, read_only=True, data_only=True)
+	ws = wb[wb.sheetnames[0]]
+	year_cols: Dict[int, int] = {}
+	for col in range(3, int(ws.max_column or 0) + 1):
+		year = parse_year_cell(ws.cell(row=1, column=col).value)
+		if year is not None and 1990 <= int(year) <= 2022:
+			year_cols[int(year)] = col
+
+	rows: List[dict] = []
+	for ridx in range(2, int(ws.max_row or 0) + 1):
+		province_raw = ws.cell(row=ridx, column=2).value
+		province = normalize_province_name(str(province_raw))
+		if not province:
+			continue
+		for year, col in sorted(year_cols.items()):
+			v = to_float(ws.cell(row=ridx, column=col).value)
+			if v is None:
+				continue
+			rows.append({"province": province, "year": int(year), variable_name: float(v)})
+
+	df = pd.DataFrame(rows, columns=["province", "year", variable_name])
+	if not df.empty:
+		df = cast(pd.DataFrame, df.loc[df["year"].between(1990, 2022), :].copy())
+		df = df.sort_values(["province", "year"]).drop_duplicates(subset=["province", "year"], keep="last").reset_index(drop=True)
+	return VariableSeries(name=variable_name, source=source_name, data=cast(pd.DataFrame, df))
+
+
+def merge_provincial_variable(panel: pd.DataFrame, series: VariableSeries) -> pd.DataFrame:
+	if series.data.empty:
+		return panel
+	value_col = series.name
+	temp_col = f"{value_col}_provincial_ref"
+	df = panel.merge(series.data.rename(columns={value_col: temp_col}), on=["province", "year"], how="left")
+	observed_mask = df[temp_col].notna()
+	df.loc[observed_mask, value_col] = pd.to_numeric(df.loc[observed_mask, temp_col], errors="coerce")
+	df.loc[observed_mask, f"{value_col}_source"] = series.source
+	df.loc[observed_mask, f"{value_col}_is_national_proxy"] = 0
+	df = df.drop(columns=[temp_col], errors="ignore")
+	return df
+
+
 def transformed_interpolate_extrapolate_by_province(
 	df: pd.DataFrame,
 	value_col: str,
@@ -1061,7 +1112,11 @@ def allocate_missing_energy_from_national_proxy(panel: pd.DataFrame, source_name
 			continue
 
 		year_gdp = pd.to_numeric(df.loc[year_mask, "GDP"], errors="coerce")
-		weights = year_gdp.loc[missing_mask]
+		year_industry = pd.to_numeric(df.loc[year_mask, "Industry"], errors="coerce") if "Industry" in df.columns else pd.Series(np.nan, index=df.index[year_mask])
+		weights = year_gdp.loc[missing_mask].copy()
+		if not year_industry.empty:
+			industry_component = year_industry.loc[missing_mask].fillna(0.0)
+			weights = weights * (1.0 + industry_component / 100.0)
 		weights = weights.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 		weight_sum = float(weights.sum())
 		if weight_sum > 0:
@@ -1170,12 +1225,26 @@ def main() -> None:
 
 	co2_panel = build_co2_panel(items)
 	controls = build_national_controls(items)
+	prov_gdp = read_provincial_wide_series(
+		items,
+		["省份维度", "经济相关", "省级GDP"],
+		variable_name="GDP",
+		source_name="Provincial_macro_GDP_1949_2024_observed",
+	)
+	prov_population = read_provincial_wide_series(
+		items,
+		["省份维度", "人口相关", "省级人口"],
+		variable_name="Population",
+		source_name="Provincial_macro_Population_1949_2024_observed",
+	)
 	energy_proxy_series = next((s for s in controls if s.name == "Energy"), None)
 	industry_proxy_series = next((s for s in controls if s.name == "Industry"), None)
 	urbanization_proxy_series = next((s for s in controls if s.name == "Urbanization"), None)
 	non_energy_controls = [s for s in controls if s.name not in {"Energy", "Industry", "Urbanization", "UrbanPopulation"}]
 
 	panel = attach_controls(co2_panel, non_energy_controls)
+	panel = merge_provincial_variable(panel, prov_gdp)
+	panel = merge_provincial_variable(panel, prov_population)
 
 	prov_industry = read_provincial_industry_share(items)
 	if not prov_industry.empty:
@@ -1280,6 +1349,8 @@ def main() -> None:
 		"year_min": int(panel_core["year"].min()) if len(panel_core) else None,
 		"year_max": int(panel_core["year"].max()) if len(panel_core) else None,
 		"co2_source_counts": panel_core["CO2_source"].value_counts(dropna=False).to_dict(),
+			"gdp_source_counts": panel["GDP_source"].value_counts(dropna=False).to_dict() if "GDP_source" in panel.columns else {},
+			"population_source_counts": panel["Population_source"].value_counts(dropna=False).to_dict() if "Population_source" in panel.columns else {},
 		"unit_diagnostics": unit_diagnostics,
 		"unit_consistency_warnings": unit_warnings,
 		"lmdi_residual_abs_ratio_stats": lmdi_residual_ratio_stats,
@@ -1299,8 +1370,9 @@ def main() -> None:
 		else {},
 		"notes": [
 			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000), and MEIC is scale-aligned to NBS via 1998-2000 vs 2001-2003 anchors.",
+			"GDP and Population use provincial observed series when available, with national macro series retained only as fallback.",
 			"Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
-			"If energy is still missing after imputation, national proxy is allocated to missing provinces by GDP share, instead of direct national total assignment.",
+			"If energy is still missing after imputation, national proxy is allocated to missing provinces by GDP x (1 + Industry share) weight, instead of direct national total assignment.",
 			"Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and additive national anchor shift for imputed years.",
 			"Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast, optional quadratic extrapolation when data support it, and additive national anchor shift for imputed years.",
 			"LMDI residual diagnostics are reported in resid_ratio, lmdi_residual_abs_ratio, and summary stats.",

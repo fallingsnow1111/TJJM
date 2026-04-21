@@ -7,19 +7,26 @@
     "NBS_2001_2022_inventory": 660,
     "MEIC_1990_2000_scaled_to_NBS_anchor_global": 330
   },
+  "gdp_source_counts": {
+    "Provincial_macro_GDP_1949_2024_observed": 990
+  },
+  "population_source_counts": {
+    "Provincial_macro_Population_1949_2024_observed": 989,
+    "National_macro_Population": 1
+  },
   "unit_diagnostics": {
     "CO2_mean": 217.39887986558463,
-    "GDP_mean": 392962.9878787879,
+    "GDP_mean": 13131.587439050507,
     "Energy_mean": 18730.14194992931,
-    "Energy_over_GDP_mean_ratio": 0.04766388318409964,
+    "Energy_over_GDP_mean_ratio": 1.4263425527845865,
     "CO2_over_Energy_mean_ratio": 0.011606899747303043
   },
   "unit_consistency_warnings": [],
   "lmdi_residual_abs_ratio_stats": {
-    "mean": 1.6433721107328958e-14,
-    "median": 4.537446319122592e-15,
-    "p90": 2.6962083215016598e-14,
-    "max": 1.885387958817845e-12
+    "mean": 1.5131498657123917e-14,
+    "median": 4.495623682322066e-15,
+    "p90": 2.372640118710191e-14,
+    "max": 2.3290086550102794e-12
   },
   "missing_ratio": {
     "CO2": 0.0,
@@ -47,8 +54,9 @@
   },
   "notes": [
     "CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000), and MEIC is scale-aligned to NBS via 1998-2000 vs 2001-2003 anchors.",
+    "GDP and Population use provincial observed series when available, with national macro series retained only as fallback.",
     "Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
-    "If energy is still missing after imputation, national proxy is allocated to missing provinces by GDP share, instead of direct national total assignment.",
+    "If energy is still missing after imputation, national proxy is allocated to missing provinces by GDP x (1 + Industry share) weight, instead of direct national total assignment.",
     "Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and additive national anchor shift for imputed years.",
     "Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast, optional quadratic extrapolation when data support it, and additive national anchor shift for imputed years.",
     "LMDI residual diagnostics are reported in resid_ratio, lmdi_residual_abs_ratio, and summary stats."

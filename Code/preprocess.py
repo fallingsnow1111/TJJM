@@ -714,6 +714,174 @@ def fill_industry_with_interpolation_fit_and_anchor(
 	return df
 
 
+def read_provincial_urbanization_share(items: List[dict]) -> pd.DataFrame:
+	path_str = select_single_sheet_path_by_keywords(items, ["省份维度", "人口相关", "城镇人口所占比重"])
+	if not path_str:
+		return pd.DataFrame(columns=["province", "year", "Urbanization_prov"])
+
+	wb = load_workbook(path_str, read_only=True, data_only=True)
+	ws = wb[wb.sheetnames[0]]
+
+	year_cols: Dict[int, int] = {}
+	for col in range(3, int(ws.max_column or 0) + 1):
+		year = parse_year_cell(ws.cell(row=1, column=col).value)
+		if year is not None and 1990 <= int(year) <= 2022:
+			year_cols[int(year)] = col
+
+	if not year_cols:
+		return pd.DataFrame(columns=["province", "year", "Urbanization_prov"])
+
+	records: List[dict] = []
+	for ridx in range(2, int(ws.max_row or 0) + 1):
+		indicator = ws.cell(row=ridx, column=1).value
+		province_raw = ws.cell(row=ridx, column=2).value
+		if not isinstance(indicator, str):
+			continue
+		if not isinstance(province_raw, str):
+			continue
+		if "城镇人口" not in indicator or "比重" not in indicator:
+			continue
+
+		province = normalize_province_name(province_raw)
+		if not province:
+			continue
+
+		for year, col in sorted(year_cols.items()):
+			v = to_float(ws.cell(row=ridx, column=col).value)
+			if v is None:
+				continue
+			records.append(
+				{
+					"province": province,
+					"year": int(year),
+					"Urbanization_prov": float(v),
+				}
+			)
+
+	df = pd.DataFrame(records)
+	if df.empty:
+		return pd.DataFrame(columns=["province", "year", "Urbanization_prov"])
+
+	df = df.sort_values(["province", "year"]).drop_duplicates(subset=["province", "year"], keep="last")
+	return df.reset_index(drop=True)
+
+
+def fill_urbanization_with_interpolation_fit_and_anchor(
+	panel: pd.DataFrame,
+	urbanization_proxy_series: Optional[VariableSeries],
+) -> pd.DataFrame:
+	df = panel.copy()
+	if "Urbanization" not in df.columns:
+		df["Urbanization"] = np.nan
+	if "Urbanization_source" not in df.columns:
+		df["Urbanization_source"] = np.nan
+	df["Urbanization_source"] = df["Urbanization_source"].astype(object)
+	if "Urbanization_is_national_proxy" not in df.columns:
+		df["Urbanization_is_national_proxy"] = np.nan
+	if "Urbanization_is_imputed" not in df.columns:
+		df["Urbanization_is_imputed"] = 0
+
+	if "Urbanization_prov" in df.columns:
+		obs_mask = df["Urbanization_prov"].notna()
+		df.loc[obs_mask, "Urbanization"] = pd.to_numeric(df.loc[obs_mask, "Urbanization_prov"], errors="coerce")
+		df.loc[obs_mask, "Urbanization_source"] = "Provincial_urbanization_share_1990_2025_observed"
+		df.loc[obs_mask, "Urbanization_is_national_proxy"] = 0
+		df.loc[obs_mask, "Urbanization_is_imputed"] = 0
+		df = df.drop(columns=["Urbanization_prov"], errors="ignore")
+
+	def clip_share(series: pd.Series) -> pd.Series:
+		return series.clip(lower=0.01, upper=99.99)
+
+	for province, idx in df.groupby("province").groups.items():
+		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
+		sub["Urbanization"] = pd.to_numeric(sub["Urbanization"], errors="coerce")
+		sub.loc[(sub["Urbanization"] <= 0) | (sub["Urbanization"] >= 100), "Urbanization"] = np.nan
+
+		# 1) In-series interpolation in logit space for internal gaps.
+		base = clip_share(sub["Urbanization"])
+		logit = np.log(base / (100.0 - base))
+		logit_interp = logit.interpolate(method="linear", limit_area="inside")
+		inside_mask = sub["Urbanization"].isna() & logit_interp.notna()
+		if inside_mask.any():
+			sub.loc[inside_mask, "Urbanization"] = 100.0 / (1.0 + np.exp(-logit_interp.loc[inside_mask]))
+			sub.loc[inside_mask, "Urbanization_source"] = "Provincial_urbanization_logit_interpolation"
+			sub.loc[inside_mask, "Urbanization_is_national_proxy"] = 0
+			sub.loc[inside_mask, "Urbanization_is_imputed"] = 1
+
+		# 2) Extrapolation for leading/trailing gaps using province-specific logit-linear fit.
+		remain_mask = sub["Urbanization"].isna()
+		obs_mask = sub["Urbanization"].notna() & (sub["Urbanization"] > 0) & (sub["Urbanization"] < 100)
+		if remain_mask.any() and int(obs_mask.sum()) >= 4:
+			x = sub.loc[obs_mask, "year"].astype(float).to_numpy()
+			y_share = clip_share(sub.loc[obs_mask, "Urbanization"]).astype(float).to_numpy()
+			y = np.log(y_share / (100.0 - y_share))
+			slope, intercept = np.polyfit(x, y, 1)
+			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
+			pred_logit = intercept + slope * xm
+			pred = 100.0 / (1.0 + np.exp(-pred_logit))
+			sub.loc[remain_mask, "Urbanization"] = pred
+			sub.loc[remain_mask, "Urbanization_source"] = "Provincial_urbanization_logit_linear_fit_extrapolation"
+			sub.loc[remain_mask, "Urbanization_is_national_proxy"] = 0
+			sub.loc[remain_mask, "Urbanization_is_imputed"] = 1
+		elif remain_mask.any() and int(obs_mask.sum()) >= 2:
+			obs = cast(pd.DataFrame, sub.loc[obs_mask, ["year", "Urbanization"]].sort_values("year").copy())
+			x1 = float(obs.iloc[0]["year"])
+			x2 = float(obs.iloc[1]["year"])
+			y1_share = float(np.clip(obs.iloc[0]["Urbanization"], 0.01, 99.99))
+			y2_share = float(np.clip(obs.iloc[1]["Urbanization"], 0.01, 99.99))
+			y1 = np.log(y1_share / (100.0 - y1_share))
+			y2 = np.log(y2_share / (100.0 - y2_share))
+			slope = (y2 - y1) / (x2 - x1) if abs(x2 - x1) > 0 else 0.0
+			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
+			pred_logit = y1 + slope * (xm - x1)
+			pred = 100.0 / (1.0 + np.exp(-pred_logit))
+			sub.loc[remain_mask, "Urbanization"] = pred
+			sub.loc[remain_mask, "Urbanization_source"] = "Provincial_urbanization_logit_backcast_extrapolation"
+			sub.loc[remain_mask, "Urbanization_is_national_proxy"] = 0
+			sub.loc[remain_mask, "Urbanization_is_imputed"] = 1
+
+		df.loc[
+			sub.index,
+			["Urbanization", "Urbanization_source", "Urbanization_is_national_proxy", "Urbanization_is_imputed"],
+		] = sub[["Urbanization", "Urbanization_source", "Urbanization_is_national_proxy", "Urbanization_is_imputed"]]
+
+	# 3) National anchoring for imputed rows and fallback for remaining missing rows.
+	if urbanization_proxy_series is not None and not urbanization_proxy_series.data.empty:
+		proxy = urbanization_proxy_series.data.rename(columns={"Urbanization": "Urbanization_national_ref"})
+		df = df.merge(proxy, on="year", how="left")
+
+		for year, idx in df.groupby("year").groups.items():
+			nat_vals = df.loc[list(idx), "Urbanization_national_ref"].dropna()
+			if nat_vals.empty:
+				continue
+			nat = float(nat_vals.iloc[0])
+			year_mask = df["year"] == year
+			imputed_mask = year_mask & (df["Urbanization_is_imputed"] == 1) & df["Urbanization"].notna()
+			if not imputed_mask.any():
+				continue
+			mean_val = float(df.loc[year_mask & df["Urbanization"].notna(), "Urbanization"].mean())
+			if not np.isfinite(mean_val) or mean_val <= 0:
+				continue
+			ratio = nat / mean_val
+			df.loc[imputed_mask, "Urbanization"] = np.clip(df.loc[imputed_mask, "Urbanization"] * ratio, 0.01, 99.99)
+			df.loc[imputed_mask, "Urbanization_source"] = (
+				df.loc[imputed_mask, "Urbanization_source"].astype(str)
+				+ "_national_anchor"
+			)
+
+		missing_urban = df["Urbanization"].isna()
+		df.loc[missing_urban, "Urbanization"] = df.loc[missing_urban, "Urbanization_national_ref"]
+		df.loc[missing_urban, "Urbanization_source"] = urbanization_proxy_series.source
+		df.loc[missing_urban, "Urbanization_is_national_proxy"] = 1
+		df.loc[missing_urban, "Urbanization_is_imputed"] = 0
+		df = df.drop(columns=["Urbanization_national_ref"], errors="ignore")
+
+	df["Urbanization"] = pd.to_numeric(df["Urbanization"], errors="coerce")
+	df["Urbanization_is_national_proxy"] = df["Urbanization_is_national_proxy"].fillna(0)
+	df["Urbanization_is_imputed"] = df["Urbanization_is_imputed"].fillna(0)
+	return df
+
+
 def safe_log(s: pd.Series) -> pd.Series:
 	return np.log(s.where(s > 0))
 
@@ -891,7 +1059,8 @@ def main() -> None:
 	controls = build_national_controls(items)
 	energy_proxy_series = next((s for s in controls if s.name == "Energy"), None)
 	industry_proxy_series = next((s for s in controls if s.name == "Industry"), None)
-	non_energy_controls = [s for s in controls if s.name not in {"Energy", "Industry"}]
+	urbanization_proxy_series = next((s for s in controls if s.name == "Urbanization"), None)
+	non_energy_controls = [s for s in controls if s.name not in {"Energy", "Industry", "Urbanization", "UrbanPopulation"}]
 
 	panel = attach_controls(co2_panel, non_energy_controls)
 
@@ -909,6 +1078,14 @@ def main() -> None:
 		panel["Industry_is_imputed"] = 0
 
 	panel = fill_industry_with_interpolation_fit_and_anchor(panel, industry_proxy_series)
+
+	prov_urbanization = read_provincial_urbanization_share(items)
+	if not prov_urbanization.empty:
+		panel = panel.merge(prov_urbanization, on=["province", "year"], how="left")
+	if "Urbanization_is_imputed" not in panel.columns:
+		panel["Urbanization_is_imputed"] = 0
+
+	panel = fill_urbanization_with_interpolation_fit_and_anchor(panel, urbanization_proxy_series)
 
 	prov_energy = read_provincial_energy_inventory(items)
 	if not prov_energy.empty:
@@ -1004,12 +1181,15 @@ def main() -> None:
 		"industry_source_counts": panel["Industry_source"].value_counts(dropna=False).to_dict()
 		if "Industry_source" in panel.columns
 		else {},
+		"urbanization_source_counts": panel["Urbanization_source"].value_counts(dropna=False).to_dict()
+		if "Urbanization_source" in panel.columns
+		else {},
 		"notes": [
 			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
 			"Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
 			"If energy still missing after imputation, national proxy fallback is applied.",
 			"Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and national year-level anchoring for imputed years.",
-			"Urbanization remains national proxy because currently available provincial urbanization file has sparse early-year coverage.",
+			"Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast and national year-level anchoring for imputed years.",
 		],
 	}
 	summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

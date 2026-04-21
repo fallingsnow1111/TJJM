@@ -1,11 +1,10 @@
 {
-  "panel_rows": 990,
+  "panel_rows": 1020,
   "province_count": 30,
   "year_min": 1990,
-  "year_max": 2022,
+  "year_max": 2023,
   "co2_source_counts": {
-    "NBS_2001_2022_inventory": 660,
-    "MEIC_1990_2000": 330
+    "MEIC_1990_2023": 1020
   },
   "missing_ratio": {
     "CO2": 0.0,
@@ -18,24 +17,31 @@
     "B": 0.0,
     "C": 0.0
   },
+  "gdp_source_counts": {
+    "Provincial_GDP_1949_2024_observed": 1020
+  },
+  "population_source_counts": {
+    "Provincial_population_1949_2024_observed": 1019,
+    "Provincial_population_log_interpolation": 1
+  },
   "energy_source_counts": {
     "Provincial_energy_inventory_1997_2022_total_final_consumption_sum": 776,
-    "Provincial_energy_log_linear_fit_extrapolation": 210,
+    "Provincial_energy_temporal_carry_fill": 240,
     "Provincial_energy_log_interpolation": 4
   },
   "industry_source_counts": {
     "Provincial_industry_share_1996_2024_observed": 809,
-    "Provincial_industry_logit_linear_fit_extrapolation_national_anchor": 181
+    "Provincial_industry_temporal_carry_fill": 211
   },
   "urbanization_source_counts": {
     "Provincial_urbanization_share_1990_2025_observed": 555,
-    "Provincial_urbanization_logit_linear_fit_extrapolation": 435
+    "Provincial_urbanization_temporal_carry_fill": 465
   },
   "notes": [
-    "CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
-    "Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
-    "If energy still missing after imputation, national proxy fallback is applied.",
-    "Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and national year-level anchoring for imputed years.",
-    "Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast and national year-level anchoring for imputed years."
+    "CO2 uses MEIC provincial total emissions only (1990-2023).",
+    "GDP and Population are read from provincial files first; fill order is in-province interpolation, temporal carry, and national fallback only if still missing.",
+    "Energy uses provincial inventory (1997-2022); fill order is in-province log interpolation, temporal carry, and national fallback only if still missing.",
+    "Industry and Urbanization use provincial share series first; fill order is in-province logit interpolation, temporal carry, and national fallback only if still missing.",
+    "Panel rows are always output in stable province-year order."
   ]
 }

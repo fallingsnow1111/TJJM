@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, cast
+from typing import Any, Dict, Iterable, List, Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -219,6 +219,13 @@ def to_float(v) -> Optional[float]:
 	return None
 
 
+def ensure_cols(df: pd.DataFrame, defaults: Dict[str, Any]) -> pd.DataFrame:
+	for col, default_value in defaults.items():
+		if col not in df.columns:
+			df[col] = cast(Any, default_value)
+	return df
+
+
 def read_inventory_co2_nbs(items: List[dict]) -> pd.DataFrame:
 	records: List[dict] = []
 
@@ -331,9 +338,39 @@ def read_meic_co2(items: List[dict]) -> pd.DataFrame:
 	return out
 
 
+def align_meic_to_nbs_scale(nbs: pd.DataFrame, meic: pd.DataFrame) -> pd.DataFrame:
+	if nbs.empty or meic.empty:
+		return meic
+
+	nbs_anchor = nbs[(nbs["year"] >= 2001) & (nbs["year"] <= 2003)]
+	meic_anchor = meic[(meic["year"] >= 1998) & (meic["year"] <= 2000)]
+	if nbs_anchor.empty or meic_anchor.empty:
+		return meic
+
+	nbs_mean = nbs_anchor.groupby("province")["CO2"].mean().reset_index(name="CO2_nbs_mean")
+	meic_mean = meic_anchor.groupby("province")["CO2"].mean().reset_index(name="CO2_meic_mean")
+	merge_scale = nbs_mean.merge(meic_mean, on="province", how="inner")
+	merge_scale["scale"] = merge_scale["CO2_nbs_mean"] / merge_scale["CO2_meic_mean"]
+	merge_scale["scale"] = pd.to_numeric(merge_scale["scale"], errors="coerce")
+	merge_scale.loc[~np.isfinite(merge_scale["scale"]) | (merge_scale["scale"] <= 0), "scale"] = np.nan
+
+	nat_nbs = float(nbs_anchor["CO2"].mean()) if not nbs_anchor.empty else np.nan
+	nat_meic = float(meic_anchor["CO2"].mean()) if not meic_anchor.empty else np.nan
+	national_scale = nat_nbs / nat_meic if (np.isfinite(nat_nbs) and np.isfinite(nat_meic) and nat_meic > 0) else 1.0
+	if not np.isfinite(national_scale) or national_scale <= 0:
+		national_scale = 1.0
+
+	scale_map = merge_scale.set_index("province")["scale"].to_dict()
+	aligned = meic.copy()
+	aligned["CO2_scale_factor"] = aligned["province"].map(scale_map).fillna(national_scale)
+	aligned["CO2"] = aligned["CO2"] * aligned["CO2_scale_factor"]
+	aligned["CO2_source"] = aligned["CO2_source"].astype(str) + "_scaled_to_NBS_anchor"
+	return aligned
+
+
 def build_co2_panel(items: List[dict]) -> pd.DataFrame:
 	nbs = read_inventory_co2_nbs(items)
-	meic = read_meic_co2(items)
+	meic = align_meic_to_nbs_scale(nbs, read_meic_co2(items))
 	combo = pd.concat([nbs, meic], ignore_index=True)
 
 	combo = combo.sort_values(["province", "year", "CO2_source_priority"]).drop_duplicates(
@@ -553,6 +590,144 @@ def build_national_controls(items: List[dict]) -> List[VariableSeries]:
 	return series_list
 
 
+def transformed_interpolate_extrapolate_by_province(
+	df: pd.DataFrame,
+	value_col: str,
+	source_col: str,
+	proxy_flag_col: str,
+	imputed_col: str,
+	mode: str,
+	inside_source: str,
+	fit_source: str,
+	backcast_source: str,
+) -> pd.DataFrame:
+	data = ensure_cols(
+		df.copy(),
+		{
+			value_col: np.nan,
+			source_col: np.nan,
+			proxy_flag_col: np.nan,
+			imputed_col: 0,
+		},
+	)
+
+	def _to_transformed(series: pd.Series) -> pd.Series:
+		if mode == "log":
+			base = pd.to_numeric(series, errors="coerce")
+			vals = np.log(base.where(base > 0))
+			return pd.Series(vals, index=series.index)
+		if mode == "logit":
+			base = pd.to_numeric(series, errors="coerce")
+			base = base.where((base > 0) & (base < 100))
+			base = base.clip(lower=0.01, upper=99.99)
+			vals = np.log(base / (100.0 - base))
+			return pd.Series(vals, index=series.index)
+		raise ValueError(f"Unsupported mode: {mode}")
+
+	def _from_transformed(series: pd.Series) -> pd.Series:
+		if mode == "log":
+			vals = np.exp(series)
+			return pd.Series(vals, index=series.index)
+		if mode == "logit":
+			vals = 100.0 / (1.0 + np.exp(-series))
+			vals_series = pd.Series(vals, index=series.index)
+			return vals_series.clip(lower=0.01, upper=99.99)
+		raise ValueError(f"Unsupported mode: {mode}")
+
+	for province, idx in data.groupby("province").groups.items():
+		sub = cast(pd.DataFrame, data.loc[list(idx), :].sort_values("year").copy())
+		sub[value_col] = pd.to_numeric(sub[value_col], errors="coerce")
+		if mode == "log":
+			sub.loc[sub[value_col] <= 0, value_col] = np.nan
+		else:
+			sub.loc[(sub[value_col] <= 0) | (sub[value_col] >= 100), value_col] = np.nan
+
+		transformed = _to_transformed(sub[value_col])
+		transformed_interp = transformed.interpolate(method="linear", limit_area="inside")
+		inside_mask = sub[value_col].isna() & transformed_interp.notna()
+		if inside_mask.any():
+			sub.loc[inside_mask, value_col] = _from_transformed(transformed_interp.loc[inside_mask])
+			sub.loc[inside_mask, source_col] = inside_source
+			sub.loc[inside_mask, proxy_flag_col] = 0
+			sub.loc[inside_mask, imputed_col] = 1
+
+		remain_mask = sub[value_col].isna()
+		obs_mask = sub[value_col].notna()
+		if remain_mask.any() and int(obs_mask.sum()) >= 4:
+			x = sub.loc[obs_mask, "year"].astype(float).to_numpy()
+			y = _to_transformed(sub.loc[obs_mask, value_col]).astype(float).to_numpy()
+			slope, intercept = np.polyfit(x, y, 1)
+			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
+			pred = _from_transformed(pd.Series(intercept + slope * xm, index=sub.loc[remain_mask].index))
+			sub.loc[remain_mask, value_col] = pred
+			sub.loc[remain_mask, source_col] = fit_source
+			sub.loc[remain_mask, proxy_flag_col] = 0
+			sub.loc[remain_mask, imputed_col] = 1
+		elif remain_mask.any() and int(obs_mask.sum()) >= 2:
+			obs = cast(pd.DataFrame, sub.loc[obs_mask, ["year", value_col]].sort_values("year").copy())
+			x1 = float(obs.iloc[0]["year"])
+			x2 = float(obs.iloc[1]["year"])
+			y1 = float(_to_transformed(pd.Series([obs.iloc[0][value_col]])).iloc[0])
+			y2 = float(_to_transformed(pd.Series([obs.iloc[1][value_col]])).iloc[0])
+			slope = (y2 - y1) / (x2 - x1) if abs(x2 - x1) > 0 else 0.0
+			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
+			pred = _from_transformed(pd.Series(y1 + slope * (xm - x1), index=sub.loc[remain_mask].index))
+			sub.loc[remain_mask, value_col] = pred
+			sub.loc[remain_mask, source_col] = backcast_source
+			sub.loc[remain_mask, proxy_flag_col] = 0
+			sub.loc[remain_mask, imputed_col] = 1
+
+		data.loc[sub.index, [value_col, source_col, proxy_flag_col, imputed_col]] = sub[
+			[value_col, source_col, proxy_flag_col, imputed_col]
+		]
+
+	data[value_col] = pd.to_numeric(data[value_col], errors="coerce")
+	data[proxy_flag_col] = pd.to_numeric(data[proxy_flag_col], errors="coerce").fillna(0)
+	data[imputed_col] = pd.to_numeric(data[imputed_col], errors="coerce").fillna(0)
+	return data
+
+
+def apply_national_anchor_shift(
+	df: pd.DataFrame,
+	value_col: str,
+	source_col: str,
+	proxy_flag_col: str,
+	imputed_col: str,
+	national_col: str,
+	fallback_source: str,
+) -> pd.DataFrame:
+	data = df.copy()
+	for year, idx in data.groupby("year").groups.items():
+		year_idx = list(idx)
+		nat_vals = data.loc[year_idx, national_col].dropna()
+		if nat_vals.empty:
+			continue
+		nat = float(nat_vals.iloc[0])
+		year_mask = data.index.isin(year_idx)
+		imputed_mask = year_mask & (data[imputed_col] == 1) & data[value_col].notna()
+		if not imputed_mask.any():
+			continue
+		mean_year = float(data.loc[year_mask & data[value_col].notna(), value_col].mean())
+		if not np.isfinite(mean_year):
+			continue
+		delta = nat - mean_year
+		data.loc[imputed_mask, value_col] = data.loc[imputed_mask, value_col] + delta
+		if value_col in {"Industry", "Urbanization"}:
+			data.loc[imputed_mask, value_col] = data.loc[imputed_mask, value_col].clip(lower=0.01, upper=99.99)
+		data.loc[imputed_mask, source_col] = data.loc[imputed_mask, source_col].astype(str) + "_national_anchor_shift"
+
+	missing_mask = data[value_col].isna() & data[national_col].notna()
+	data.loc[missing_mask, value_col] = data.loc[missing_mask, national_col]
+	data.loc[missing_mask, source_col] = fallback_source
+	data.loc[missing_mask, proxy_flag_col] = 1
+	data.loc[missing_mask, imputed_col] = 0
+
+	data = data.drop(columns=[national_col], errors="ignore")
+	data[proxy_flag_col] = pd.to_numeric(data[proxy_flag_col], errors="coerce").fillna(0)
+	data[imputed_col] = pd.to_numeric(data[imputed_col], errors="coerce").fillna(0)
+	return data
+
+
 def read_provincial_industry_share(items: List[dict]) -> pd.DataFrame:
 	path_str = select_single_sheet_path_by_keywords(items, ["省份维度", "经济相关", "省份第二产业占比"])
 	if not path_str:
@@ -611,106 +786,31 @@ def fill_industry_with_interpolation_fit_and_anchor(
 	panel: pd.DataFrame,
 	industry_proxy_series: Optional[VariableSeries],
 ) -> pd.DataFrame:
-	df = panel.copy()
-	if "Industry" not in df.columns:
-		df["Industry"] = np.nan
-	if "Industry_source" not in df.columns:
-		df["Industry_source"] = np.nan
-	if "Industry_is_national_proxy" not in df.columns:
-		df["Industry_is_national_proxy"] = np.nan
-	if "Industry_is_imputed" not in df.columns:
-		df["Industry_is_imputed"] = 0
+	df = transformed_interpolate_extrapolate_by_province(
+		panel,
+		value_col="Industry",
+		source_col="Industry_source",
+		proxy_flag_col="Industry_is_national_proxy",
+		imputed_col="Industry_is_imputed",
+		mode="logit",
+		inside_source="Provincial_industry_logit_interpolation",
+		fit_source="Provincial_industry_logit_linear_fit_extrapolation",
+		backcast_source="Provincial_industry_logit_backcast_extrapolation",
+	)
 
-	def clip_share(series: pd.Series) -> pd.Series:
-		return series.clip(lower=0.01, upper=99.99)
-
-	for province, idx in df.groupby("province").groups.items():
-		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
-		sub["Industry"] = pd.to_numeric(sub["Industry"], errors="coerce")
-		sub.loc[(sub["Industry"] <= 0) | (sub["Industry"] >= 100), "Industry"] = np.nan
-
-		# 1) In-series interpolation in logit space for internal gaps.
-		base = clip_share(sub["Industry"])
-		logit = np.log(base / (100.0 - base))
-		logit_interp = logit.interpolate(method="linear", limit_area="inside")
-		inside_mask = sub["Industry"].isna() & logit_interp.notna()
-		if inside_mask.any():
-			sub.loc[inside_mask, "Industry"] = 100.0 / (1.0 + np.exp(-logit_interp.loc[inside_mask]))
-			sub.loc[inside_mask, "Industry_source"] = "Provincial_industry_logit_interpolation"
-			sub.loc[inside_mask, "Industry_is_national_proxy"] = 0
-			sub.loc[inside_mask, "Industry_is_imputed"] = 1
-
-		# 2) Extrapolation for leading/trailing gaps using province-specific logit-linear fit.
-		remain_mask = sub["Industry"].isna()
-		obs_mask = sub["Industry"].notna() & (sub["Industry"] > 0) & (sub["Industry"] < 100)
-		if remain_mask.any() and int(obs_mask.sum()) >= 4:
-			x = sub.loc[obs_mask, "year"].astype(float).to_numpy()
-			y_share = clip_share(sub.loc[obs_mask, "Industry"]).astype(float).to_numpy()
-			y = np.log(y_share / (100.0 - y_share))
-			slope, intercept = np.polyfit(x, y, 1)
-			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
-			pred_logit = intercept + slope * xm
-			pred = 100.0 / (1.0 + np.exp(-pred_logit))
-			sub.loc[remain_mask, "Industry"] = pred
-			sub.loc[remain_mask, "Industry_source"] = "Provincial_industry_logit_linear_fit_extrapolation"
-			sub.loc[remain_mask, "Industry_is_national_proxy"] = 0
-			sub.loc[remain_mask, "Industry_is_imputed"] = 1
-		elif remain_mask.any() and int(obs_mask.sum()) >= 2:
-			obs = cast(pd.DataFrame, sub.loc[obs_mask, ["year", "Industry"]].sort_values("year").copy())
-			x1 = float(obs.iloc[0]["year"])
-			x2 = float(obs.iloc[1]["year"])
-			y1_share = float(np.clip(obs.iloc[0]["Industry"], 0.01, 99.99))
-			y2_share = float(np.clip(obs.iloc[1]["Industry"], 0.01, 99.99))
-			y1 = np.log(y1_share / (100.0 - y1_share))
-			y2 = np.log(y2_share / (100.0 - y2_share))
-			slope = (y2 - y1) / (x2 - x1) if abs(x2 - x1) > 0 else 0.0
-			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
-			pred_logit = y1 + slope * (xm - x1)
-			pred = 100.0 / (1.0 + np.exp(-pred_logit))
-			sub.loc[remain_mask, "Industry"] = pred
-			sub.loc[remain_mask, "Industry_source"] = "Provincial_industry_logit_backcast_extrapolation"
-			sub.loc[remain_mask, "Industry_is_national_proxy"] = 0
-			sub.loc[remain_mask, "Industry_is_imputed"] = 1
-
-		df.loc[
-			sub.index,
-			["Industry", "Industry_source", "Industry_is_national_proxy", "Industry_is_imputed"],
-		] = sub[["Industry", "Industry_source", "Industry_is_national_proxy", "Industry_is_imputed"]]
-
-	# 3) National anchoring for imputed rows only (year-level mean calibration).
 	if industry_proxy_series is not None and not industry_proxy_series.data.empty:
 		proxy = industry_proxy_series.data.rename(columns={"Industry": "Industry_national_ref"})
 		df = df.merge(proxy, on="year", how="left")
+		df = apply_national_anchor_shift(
+			df,
+			value_col="Industry",
+			source_col="Industry_source",
+			proxy_flag_col="Industry_is_national_proxy",
+			imputed_col="Industry_is_imputed",
+			national_col="Industry_national_ref",
+			fallback_source=industry_proxy_series.source,
+		)
 
-		for year, idx in df.groupby("year").groups.items():
-			nat_vals = df.loc[list(idx), "Industry_national_ref"].dropna()
-			if nat_vals.empty:
-				continue
-			nat = float(nat_vals.iloc[0])
-			year_mask = df["year"] == year
-			imputed_mask = year_mask & (df["Industry_is_imputed"] == 1) & df["Industry"].notna()
-			if not imputed_mask.any():
-				continue
-			mean_val = float(df.loc[year_mask & df["Industry"].notna(), "Industry"].mean())
-			if not np.isfinite(mean_val) or mean_val <= 0:
-				continue
-			ratio = nat / mean_val
-			df.loc[imputed_mask, "Industry"] = np.clip(df.loc[imputed_mask, "Industry"] * ratio, 0.01, 99.99)
-			df.loc[imputed_mask, "Industry_source"] = (
-				df.loc[imputed_mask, "Industry_source"].astype(str)
-				+ "_national_anchor"
-			)
-
-		missing_industry = df["Industry"].isna()
-		df.loc[missing_industry, "Industry"] = df.loc[missing_industry, "Industry_national_ref"]
-		df.loc[missing_industry, "Industry_source"] = industry_proxy_series.source
-		df.loc[missing_industry, "Industry_is_national_proxy"] = 1
-		df.loc[missing_industry, "Industry_is_imputed"] = 0
-		df = df.drop(columns=["Industry_national_ref"], errors="ignore")
-
-	df["Industry"] = pd.to_numeric(df["Industry"], errors="coerce")
-	df["Industry_is_national_proxy"] = df["Industry_is_national_proxy"].fillna(0)
-	df["Industry_is_imputed"] = df["Industry_is_imputed"].fillna(0)
 	return df
 
 
@@ -770,16 +870,16 @@ def fill_urbanization_with_interpolation_fit_and_anchor(
 	panel: pd.DataFrame,
 	urbanization_proxy_series: Optional[VariableSeries],
 ) -> pd.DataFrame:
-	df = panel.copy()
-	if "Urbanization" not in df.columns:
-		df["Urbanization"] = np.nan
-	if "Urbanization_source" not in df.columns:
-		df["Urbanization_source"] = np.nan
+	df = ensure_cols(
+		panel.copy(),
+		{
+			"Urbanization": np.nan,
+			"Urbanization_source": np.nan,
+			"Urbanization_is_national_proxy": np.nan,
+			"Urbanization_is_imputed": 0,
+		},
+	)
 	df["Urbanization_source"] = df["Urbanization_source"].astype(object)
-	if "Urbanization_is_national_proxy" not in df.columns:
-		df["Urbanization_is_national_proxy"] = np.nan
-	if "Urbanization_is_imputed" not in df.columns:
-		df["Urbanization_is_imputed"] = 0
 
 	if "Urbanization_prov" in df.columns:
 		obs_mask = df["Urbanization_prov"].notna()
@@ -789,101 +889,37 @@ def fill_urbanization_with_interpolation_fit_and_anchor(
 		df.loc[obs_mask, "Urbanization_is_imputed"] = 0
 		df = df.drop(columns=["Urbanization_prov"], errors="ignore")
 
-	def clip_share(series: pd.Series) -> pd.Series:
-		return series.clip(lower=0.01, upper=99.99)
+	df = transformed_interpolate_extrapolate_by_province(
+		df,
+		value_col="Urbanization",
+		source_col="Urbanization_source",
+		proxy_flag_col="Urbanization_is_national_proxy",
+		imputed_col="Urbanization_is_imputed",
+		mode="logit",
+		inside_source="Provincial_urbanization_logit_interpolation",
+		fit_source="Provincial_urbanization_logit_linear_fit_extrapolation",
+		backcast_source="Provincial_urbanization_logit_backcast_extrapolation",
+	)
 
-	for province, idx in df.groupby("province").groups.items():
-		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
-		sub["Urbanization"] = pd.to_numeric(sub["Urbanization"], errors="coerce")
-		sub.loc[(sub["Urbanization"] <= 0) | (sub["Urbanization"] >= 100), "Urbanization"] = np.nan
-
-		# 1) In-series interpolation in logit space for internal gaps.
-		base = clip_share(sub["Urbanization"])
-		logit = np.log(base / (100.0 - base))
-		logit_interp = logit.interpolate(method="linear", limit_area="inside")
-		inside_mask = sub["Urbanization"].isna() & logit_interp.notna()
-		if inside_mask.any():
-			sub.loc[inside_mask, "Urbanization"] = 100.0 / (1.0 + np.exp(-logit_interp.loc[inside_mask]))
-			sub.loc[inside_mask, "Urbanization_source"] = "Provincial_urbanization_logit_interpolation"
-			sub.loc[inside_mask, "Urbanization_is_national_proxy"] = 0
-			sub.loc[inside_mask, "Urbanization_is_imputed"] = 1
-
-		# 2) Extrapolation for leading/trailing gaps using province-specific logit-linear fit.
-		remain_mask = sub["Urbanization"].isna()
-		obs_mask = sub["Urbanization"].notna() & (sub["Urbanization"] > 0) & (sub["Urbanization"] < 100)
-		if remain_mask.any() and int(obs_mask.sum()) >= 4:
-			x = sub.loc[obs_mask, "year"].astype(float).to_numpy()
-			y_share = clip_share(sub.loc[obs_mask, "Urbanization"]).astype(float).to_numpy()
-			y = np.log(y_share / (100.0 - y_share))
-			slope, intercept = np.polyfit(x, y, 1)
-			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
-			pred_logit = intercept + slope * xm
-			pred = 100.0 / (1.0 + np.exp(-pred_logit))
-			sub.loc[remain_mask, "Urbanization"] = pred
-			sub.loc[remain_mask, "Urbanization_source"] = "Provincial_urbanization_logit_linear_fit_extrapolation"
-			sub.loc[remain_mask, "Urbanization_is_national_proxy"] = 0
-			sub.loc[remain_mask, "Urbanization_is_imputed"] = 1
-		elif remain_mask.any() and int(obs_mask.sum()) >= 2:
-			obs = cast(pd.DataFrame, sub.loc[obs_mask, ["year", "Urbanization"]].sort_values("year").copy())
-			x1 = float(obs.iloc[0]["year"])
-			x2 = float(obs.iloc[1]["year"])
-			y1_share = float(np.clip(obs.iloc[0]["Urbanization"], 0.01, 99.99))
-			y2_share = float(np.clip(obs.iloc[1]["Urbanization"], 0.01, 99.99))
-			y1 = np.log(y1_share / (100.0 - y1_share))
-			y2 = np.log(y2_share / (100.0 - y2_share))
-			slope = (y2 - y1) / (x2 - x1) if abs(x2 - x1) > 0 else 0.0
-			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
-			pred_logit = y1 + slope * (xm - x1)
-			pred = 100.0 / (1.0 + np.exp(-pred_logit))
-			sub.loc[remain_mask, "Urbanization"] = pred
-			sub.loc[remain_mask, "Urbanization_source"] = "Provincial_urbanization_logit_backcast_extrapolation"
-			sub.loc[remain_mask, "Urbanization_is_national_proxy"] = 0
-			sub.loc[remain_mask, "Urbanization_is_imputed"] = 1
-
-		df.loc[
-			sub.index,
-			["Urbanization", "Urbanization_source", "Urbanization_is_national_proxy", "Urbanization_is_imputed"],
-		] = sub[["Urbanization", "Urbanization_source", "Urbanization_is_national_proxy", "Urbanization_is_imputed"]]
-
-	# 3) National anchoring for imputed rows and fallback for remaining missing rows.
 	if urbanization_proxy_series is not None and not urbanization_proxy_series.data.empty:
 		proxy = urbanization_proxy_series.data.rename(columns={"Urbanization": "Urbanization_national_ref"})
 		df = df.merge(proxy, on="year", how="left")
+		df = apply_national_anchor_shift(
+			df,
+			value_col="Urbanization",
+			source_col="Urbanization_source",
+			proxy_flag_col="Urbanization_is_national_proxy",
+			imputed_col="Urbanization_is_imputed",
+			national_col="Urbanization_national_ref",
+			fallback_source=urbanization_proxy_series.source,
+		)
 
-		for year, idx in df.groupby("year").groups.items():
-			nat_vals = df.loc[list(idx), "Urbanization_national_ref"].dropna()
-			if nat_vals.empty:
-				continue
-			nat = float(nat_vals.iloc[0])
-			year_mask = df["year"] == year
-			imputed_mask = year_mask & (df["Urbanization_is_imputed"] == 1) & df["Urbanization"].notna()
-			if not imputed_mask.any():
-				continue
-			mean_val = float(df.loc[year_mask & df["Urbanization"].notna(), "Urbanization"].mean())
-			if not np.isfinite(mean_val) or mean_val <= 0:
-				continue
-			ratio = nat / mean_val
-			df.loc[imputed_mask, "Urbanization"] = np.clip(df.loc[imputed_mask, "Urbanization"] * ratio, 0.01, 99.99)
-			df.loc[imputed_mask, "Urbanization_source"] = (
-				df.loc[imputed_mask, "Urbanization_source"].astype(str)
-				+ "_national_anchor"
-			)
-
-		missing_urban = df["Urbanization"].isna()
-		df.loc[missing_urban, "Urbanization"] = df.loc[missing_urban, "Urbanization_national_ref"]
-		df.loc[missing_urban, "Urbanization_source"] = urbanization_proxy_series.source
-		df.loc[missing_urban, "Urbanization_is_national_proxy"] = 1
-		df.loc[missing_urban, "Urbanization_is_imputed"] = 0
-		df = df.drop(columns=["Urbanization_national_ref"], errors="ignore")
-
-	df["Urbanization"] = pd.to_numeric(df["Urbanization"], errors="coerce")
-	df["Urbanization_is_national_proxy"] = df["Urbanization_is_national_proxy"].fillna(0)
-	df["Urbanization_is_imputed"] = df["Urbanization_is_imputed"].fillna(0)
 	return df
 
 
 def safe_log(s: pd.Series) -> pd.Series:
-	return np.log(s.where(s > 0))
+	vals = np.log(s.where(s > 0))
+	return pd.Series(vals, index=s.index)
 
 
 def add_kaya_features(panel: pd.DataFrame) -> pd.DataFrame:
@@ -946,6 +982,7 @@ def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
 			d_c = lm * np.log(float(ct) / float(c0))
 			d_co2 = float(et) - float(e0)
 			resid = d_co2 - (d_p + d_a + d_b + d_c)
+			resid_ratio_abs = abs(resid) / max(abs(d_co2), 1e-12)
 
 			rows.append(
 				{
@@ -958,6 +995,7 @@ def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
 					"delta_B": d_b,
 					"delta_C": d_c,
 					"lmdi_residual": resid,
+					"lmdi_residual_abs_ratio": resid_ratio_abs,
 				}
 			)
 
@@ -991,64 +1029,104 @@ def attach_controls(panel: pd.DataFrame, controls: List[VariableSeries]) -> pd.D
 
 
 def fill_energy_with_interpolation_and_fit(panel: pd.DataFrame) -> pd.DataFrame:
+	return transformed_interpolate_extrapolate_by_province(
+		panel,
+		value_col="Energy",
+		source_col="Energy_source",
+		proxy_flag_col="Energy_is_national_proxy",
+		imputed_col="Energy_is_imputed",
+		mode="log",
+		inside_source="Provincial_energy_log_interpolation",
+		fit_source="Provincial_energy_log_linear_fit_extrapolation",
+		backcast_source="Provincial_energy_cagr_backcast_extrapolation",
+	)
+
+
+def allocate_missing_energy_from_national_proxy(panel: pd.DataFrame, source_name: str) -> pd.DataFrame:
 	df = panel.copy()
-	if "Energy" not in df.columns:
-		df["Energy"] = np.nan
-	if "Energy_source" not in df.columns:
-		df["Energy_source"] = np.nan
-	if "Energy_is_national_proxy" not in df.columns:
-		df["Energy_is_national_proxy"] = np.nan
-	if "Energy_is_imputed" not in df.columns:
-		df["Energy_is_imputed"] = 0
+	df = ensure_cols(
+		df,
+		{
+			"Energy": np.nan,
+			"Energy_source": np.nan,
+			"Energy_is_national_proxy": np.nan,
+			"Energy_is_imputed": 0,
+		},
+	)
 
-	for province, idx in df.groupby("province").groups.items():
-		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
-		sub["Energy"] = pd.to_numeric(sub["Energy"], errors="coerce")
-		sub.loc[sub["Energy"] <= 0, "Energy"] = np.nan
+	for year, idx in df.groupby("year").groups.items():
+		year_idx = list(idx)
+		nat_vals = df.loc[year_idx, "Energy_proxy"].dropna()
+		if nat_vals.empty:
+			continue
+		nat_energy = float(nat_vals.iloc[0])
+		year_mask = df.index.isin(year_idx)
+		missing_mask = year_mask & df["Energy"].isna()
+		if not missing_mask.any():
+			continue
 
-		# 1) In-series interpolation in log space for internal gaps.
-		log_energy = np.log(sub["Energy"].where(sub["Energy"] > 0))
-		log_interp = log_energy.interpolate(method="linear", limit_area="inside")
-		inside_mask = sub["Energy"].isna() & log_interp.notna()
-		if inside_mask.any():
-			sub.loc[inside_mask, "Energy"] = np.exp(log_interp.loc[inside_mask])
-			sub.loc[inside_mask, "Energy_source"] = "Provincial_energy_log_interpolation"
-			sub.loc[inside_mask, "Energy_is_national_proxy"] = 0
-			sub.loc[inside_mask, "Energy_is_imputed"] = 1
+		co2_total = float(df.loc[year_mask, "CO2"].sum(skipna=True))
+		if np.isfinite(co2_total) and co2_total > 0:
+			weights = df.loc[missing_mask, "CO2"] / co2_total
+			weights = weights.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+			weight_sum = float(weights.sum())
+		else:
+			weights = pd.Series(0.0, index=df.loc[missing_mask].index)
+			weight_sum = 0.0
 
-		# 2) Extrapolation for leading/trailing gaps using province-specific log-linear fit.
-		remain_mask = sub["Energy"].isna()
-		obs_mask = sub["Energy"].notna() & (sub["Energy"] > 0)
-		if remain_mask.any() and int(obs_mask.sum()) >= 4:
-			x = sub.loc[obs_mask, "year"].astype(float).to_numpy()
-			y = np.log(sub.loc[obs_mask, "Energy"].astype(float).to_numpy())
-			slope, intercept = np.polyfit(x, y, 1)
-			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
-			pred = np.exp(intercept + slope * xm)
-			sub.loc[remain_mask, "Energy"] = pred
-			sub.loc[remain_mask, "Energy_source"] = "Provincial_energy_log_linear_fit_extrapolation"
-			sub.loc[remain_mask, "Energy_is_national_proxy"] = 0
-			sub.loc[remain_mask, "Energy_is_imputed"] = 1
-		elif remain_mask.any() and int(obs_mask.sum()) >= 2:
-			obs = cast(pd.DataFrame, sub.loc[obs_mask, ["year", "Energy"]].sort_values("year").copy())
-			x1 = float(obs.iloc[0]["year"])
-			x2 = float(obs.iloc[1]["year"])
-			y1 = float(obs.iloc[0]["Energy"])
-			y2 = float(obs.iloc[1]["Energy"])
-			slope = (np.log(y2) - np.log(y1)) / (x2 - x1) if abs(x2 - x1) > 0 else 0.0
-			xm = sub.loc[remain_mask, "year"].astype(float).to_numpy()
-			pred = np.exp(np.log(y1) + slope * (xm - x1))
-			sub.loc[remain_mask, "Energy"] = pred
-			sub.loc[remain_mask, "Energy_source"] = "Provincial_energy_cagr_backcast_extrapolation"
-			sub.loc[remain_mask, "Energy_is_national_proxy"] = 0
-			sub.loc[remain_mask, "Energy_is_imputed"] = 1
-
-		df.loc[sub.index, ["Energy", "Energy_source", "Energy_is_national_proxy", "Energy_is_imputed"]] = sub[
-			["Energy", "Energy_source", "Energy_is_national_proxy", "Energy_is_imputed"]
-		]
+		if weight_sum > 0:
+			observed_sum = float(df.loc[year_mask & df["Energy"].notna(), "Energy"].sum(skipna=True))
+			remaining = nat_energy - observed_sum
+			if np.isfinite(remaining) and remaining > 0:
+				fill_values = remaining * (weights / weight_sum)
+				fill_source = source_name + "_residual_allocated_by_CO2_share"
+			else:
+				fill_values = nat_energy * (weights / weight_sum)
+				fill_source = source_name + "_allocated_by_CO2_share"
+			df.loc[missing_mask, "Energy"] = fill_values.values
+			df.loc[missing_mask, "Energy_source"] = fill_source
+			df.loc[missing_mask, "Energy_is_national_proxy"] = 1
+			df.loc[missing_mask, "Energy_is_imputed"] = 1
+		else:
+			count_missing = int(missing_mask.sum())
+			if count_missing <= 0:
+				continue
+			df.loc[missing_mask, "Energy"] = nat_energy / count_missing
+			df.loc[missing_mask, "Energy_source"] = source_name + "_equal_split_fallback"
+			df.loc[missing_mask, "Energy_is_national_proxy"] = 1
+			df.loc[missing_mask, "Energy_is_imputed"] = 1
 
 	df["Energy"] = pd.to_numeric(df["Energy"], errors="coerce")
+	df["Energy_is_national_proxy"] = pd.to_numeric(df["Energy_is_national_proxy"], errors="coerce").fillna(0)
+	df["Energy_is_imputed"] = pd.to_numeric(df["Energy_is_imputed"], errors="coerce").fillna(0)
 	return df
+
+
+def collect_unit_consistency_warnings(panel: pd.DataFrame) -> List[str]:
+	warnings: List[str] = []
+	for col in ["CO2", "GDP", "Population", "Energy"]:
+		if col not in panel.columns:
+			warnings.append(f"Missing required column: {col}")
+			continue
+		vals = pd.to_numeric(panel[col], errors="coerce")
+		if vals.notna().sum() == 0:
+			warnings.append(f"Column has no numeric values: {col}")
+		elif (vals <= 0).all():
+			warnings.append(f"Column has no positive values: {col}")
+
+	for ratio_col in ["B", "C"]:
+		if ratio_col not in panel.columns:
+			continue
+		vals = pd.to_numeric(panel[ratio_col], errors="coerce")
+		vals = vals[np.isfinite(vals) & (vals > 0)]
+		if vals.empty:
+			warnings.append(f"Ratio {ratio_col} has no positive finite values")
+			continue
+		med = float(vals.median())
+		if med < 1e-8 or med > 1e8:
+			warnings.append(f"Ratio {ratio_col} median out of expected range: {med:.3e}")
+
+	return warnings
 
 
 def main() -> None:
@@ -1105,23 +1183,7 @@ def main() -> None:
 	if energy_proxy_series is not None and not energy_proxy_series.data.empty:
 		energy_proxy_df = energy_proxy_series.data.rename(columns={"Energy": "Energy_proxy"})
 		panel = panel.merge(energy_proxy_df, on="year", how="left")
-
-		if "Energy" not in panel.columns:
-			panel["Energy"] = np.nan
-		if "Energy_source" not in panel.columns:
-			panel["Energy_source"] = np.nan
-		if "Energy_is_national_proxy" not in panel.columns:
-			panel["Energy_is_national_proxy"] = np.nan
-
-		missing_energy = panel["Energy"].isna()
-		panel.loc[missing_energy, "Energy"] = panel.loc[missing_energy, "Energy_proxy"]
-		panel.loc[missing_energy, "Energy_source"] = energy_proxy_series.source
-		panel.loc[missing_energy, "Energy_is_national_proxy"] = 1
-		panel.loc[missing_energy, "Energy_is_imputed"] = 0
-		panel.loc[~missing_energy & panel["Energy"].notna(), "Energy_is_national_proxy"] = panel.loc[
-			~missing_energy & panel["Energy"].notna(), "Energy_is_national_proxy"
-		].fillna(0)
-
+		panel = allocate_missing_energy_from_national_proxy(panel, energy_proxy_series.source)
 		panel = panel.drop(columns=["Energy_proxy"], errors="ignore")
 
 	panel["Energy_is_national_proxy"] = panel["Energy_is_national_proxy"].fillna(0)
@@ -1145,9 +1207,20 @@ def main() -> None:
 	panel_core = cast(pd.DataFrame, panel.loc[:, [c for c in core_cols if c in panel.columns]].copy())
 
 	# Keep rows where CO2 exists; remaining variables are filled by available controls.
-	panel_core = cast(pd.DataFrame, panel_core.sort_values(by="year").sort_values(by="province").reset_index(drop=True))
+	panel_core = cast(
+		pd.DataFrame,
+		panel_core.sort_values(by=["year", "province"], kind="mergesort").reset_index(drop=True),
+	)
 
 	lmdi_df = compute_lmdi_time(panel_core)
+	unit_warnings = collect_unit_consistency_warnings(panel_core)
+	lmdi_residual_ratio_stats = {}
+	if not lmdi_df.empty and "lmdi_residual_abs_ratio" in lmdi_df.columns:
+		lmdi_residual_ratio_stats = {
+			"median": float(lmdi_df["lmdi_residual_abs_ratio"].median()),
+			"p90": float(lmdi_df["lmdi_residual_abs_ratio"].quantile(0.9)),
+			"max": float(lmdi_df["lmdi_residual_abs_ratio"].max()),
+		}
 
 	panel_path = OUT_DIR / "panel_master.csv"
 	lmdi_path = OUT_DIR / "lmdi_decomposition.csv"
@@ -1170,6 +1243,8 @@ def main() -> None:
 		"year_min": int(panel_core["year"].min()) if len(panel_core) else None,
 		"year_max": int(panel_core["year"].max()) if len(panel_core) else None,
 		"co2_source_counts": panel_core["CO2_source"].value_counts(dropna=False).to_dict(),
+		"unit_consistency_warnings": unit_warnings,
+		"lmdi_residual_abs_ratio_stats": lmdi_residual_ratio_stats,
 		"missing_ratio": {
 			c: float(panel_core[c].isna().mean())
 			for c in ["CO2", "GDP", "Population", "Energy", "Industry", "Urbanization", "A", "B", "C"]
@@ -1185,11 +1260,12 @@ def main() -> None:
 		if "Urbanization_source" in panel.columns
 		else {},
 		"notes": [
-			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
+			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000), and MEIC is scale-aligned to NBS via 1998-2000 vs 2001-2003 anchors.",
 			"Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
-			"If energy still missing after imputation, national proxy fallback is applied.",
-			"Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and national year-level anchoring for imputed years.",
-			"Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast and national year-level anchoring for imputed years.",
+			"If energy is still missing after imputation, national proxy is allocated to missing provinces by CO2 share, instead of direct national total assignment.",
+			"Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and additive national anchor shift for imputed years.",
+			"Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast and additive national anchor shift for imputed years.",
+			"LMDI residual diagnostics are reported in lmdi_residual_abs_ratio and summary stats.",
 		],
 	}
 	summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

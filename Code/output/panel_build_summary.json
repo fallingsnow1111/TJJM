@@ -5,7 +5,13 @@
   "year_max": 2022,
   "co2_source_counts": {
     "NBS_2001_2022_inventory": 660,
-    "MEIC_1990_2000": 330
+    "MEIC_1990_2000_scaled_to_NBS_anchor": 330
+  },
+  "unit_consistency_warnings": [],
+  "lmdi_residual_abs_ratio_stats": {
+    "median": 4.56729453310042e-15,
+    "p90": 2.6962083215016598e-14,
+    "max": 1.885387958817845e-12
   },
   "missing_ratio": {
     "CO2": 0.0,
@@ -25,17 +31,18 @@
   },
   "industry_source_counts": {
     "Provincial_industry_share_1996_2024_observed": 809,
-    "Provincial_industry_logit_linear_fit_extrapolation_national_anchor": 181
+    "Provincial_industry_logit_linear_fit_extrapolation_national_anchor_shift": 181
   },
   "urbanization_source_counts": {
     "Provincial_urbanization_share_1990_2025_observed": 555,
     "Provincial_urbanization_logit_linear_fit_extrapolation": 435
   },
   "notes": [
-    "CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000).",
+    "CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000), and MEIC is scale-aligned to NBS via 1998-2000 vs 2001-2003 anchors.",
     "Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
-    "If energy still missing after imputation, national proxy fallback is applied.",
-    "Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and national year-level anchoring for imputed years.",
-    "Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast and national year-level anchoring for imputed years."
+    "If energy is still missing after imputation, national proxy is allocated to missing provinces by CO2 share, instead of direct national total assignment.",
+    "Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and additive national anchor shift for imputed years.",
+    "Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast and additive national anchor shift for imputed years.",
+    "LMDI residual diagnostics are reported in lmdi_residual_abs_ratio and summary stats."
   ]
 }

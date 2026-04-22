@@ -26,22 +26,22 @@
   },
   "energy_source_counts": {
     "Provincial_energy_inventory_1997_2022_total_final_consumption_sum": 776,
-    "Provincial_energy_temporal_carry_fill": 240,
+    "Provincial_energy_log_polynomial_fit": 240,
     "Provincial_energy_log_interpolation": 4
   },
   "industry_source_counts": {
     "Provincial_industry_share_1996_2024_observed": 809,
-    "Provincial_industry_temporal_carry_fill": 211
+    "Provincial_industry_logit_polynomial_fit": 211
   },
   "urbanization_source_counts": {
     "Provincial_urbanization_share_1990_2025_observed": 555,
-    "Provincial_urbanization_temporal_carry_fill": 465
+    "Provincial_urbanization_logit_polynomial_fit": 465
   },
   "notes": [
     "CO2 uses MEIC provincial total emissions only (1990-2023).",
-    "GDP and Population are read from provincial files first; fill order is in-province interpolation, temporal carry, and national fallback only if still missing.",
-    "Energy uses provincial inventory (1997-2022); fill order is in-province log interpolation, temporal carry, and national fallback only if still missing.",
-    "Industry and Urbanization use provincial share series first; fill order is in-province logit interpolation, temporal carry, and national fallback only if still missing.",
+    "All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
+    "No national fallback is used in this build.",
+    "LMDI decomposition is temporarily disabled.",
     "Panel rows are always output in stable province-year order."
   ]
 }

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, cast
@@ -117,15 +116,6 @@ ZH_PROVINCE_ALIAS = {
 	"新疆": "Xinjiang",
 	"新疆维吾尔自治区": "Xinjiang",
 }
-
-
-@dataclass
-class VariableSeries:
-	"""保存单个变量的时间序列数据及其来源信息。"""
-
-	name: str
-	source: str
-	data: pd.DataFrame
 
 
 def load_dataset_index() -> List[dict]:
@@ -262,22 +252,13 @@ def ensure_metric_columns(df: pd.DataFrame, metric: str, include_imputed: bool =
 	if metric not in df.columns:
 		df[metric] = np.nan
 	source_col = f"{metric}_source"
-	proxy_col = f"{metric}_is_national_proxy"
 	if source_col not in df.columns:
 		df[source_col] = np.nan
-	if proxy_col not in df.columns:
-		df[proxy_col] = np.nan
 	if include_imputed:
 		imputed_col = f"{metric}_is_imputed"
 		if imputed_col not in df.columns:
 			df[imputed_col] = 0
 	return df
-
-
-def get_control_series(controls: List[VariableSeries], name: str) -> Optional[VariableSeries]:
-	"""按名称获取国家兜底序列。"""
-
-	return next((s for s in controls if s.name == name), None)
 
 
 def read_meic_co2(items: List[dict]) -> pd.DataFrame:
@@ -398,6 +379,111 @@ def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
 	return df.reset_index(drop=True)
 
 
+def _fit_transform_series(series: pd.Series, mode: str) -> pd.Series:
+	if mode == "log":
+		return cast(pd.Series, np.log(series.where(series > 0)))
+	if mode == "logit":
+		clipped = series.clip(lower=0.01, upper=99.99)
+		return cast(pd.Series, np.log(clipped / (100.0 - clipped)))
+	return series.copy()
+
+
+def _inverse_transform_series(series: pd.Series, mode: str) -> pd.Series:
+	if mode == "log":
+		return cast(pd.Series, np.exp(series))
+	if mode == "logit":
+		return cast(pd.Series, 100.0 / (1.0 + np.exp(-series)))
+	return series.copy()
+
+
+def fill_series_provincial_only(
+	panel: pd.DataFrame,
+	metric: str,
+	transform_mode: str,
+	interpolation_source: str,
+	polyfit_source: str,
+	min_valid: float,
+	max_valid: Optional[float] = None,
+	observed_col: Optional[str] = None,
+	observed_source: Optional[str] = None,
+) -> pd.DataFrame:
+	"""省内补全：中间缺口插值，前后缺口多项式拟合。"""
+
+	df = panel.copy()
+	df = ensure_metric_columns(df, metric, include_imputed=True)
+
+	source_col = f"{metric}_source"
+	imputed_col = f"{metric}_is_imputed"
+	df[source_col] = df[source_col].astype(object)
+
+	if observed_col and observed_col in df.columns:
+		obs_mask = df[observed_col].notna()
+		df.loc[obs_mask, metric] = pd.to_numeric(df.loc[obs_mask, observed_col], errors="coerce")
+		if observed_source:
+			df.loc[obs_mask, source_col] = observed_source
+		df.loc[obs_mask, imputed_col] = 0
+		df = df.drop(columns=[observed_col], errors="ignore")
+
+	for _, idx in df.groupby("province").groups.items():
+		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
+		sub[metric] = pd.to_numeric(sub[metric], errors="coerce")
+		sub.loc[sub[metric] <= min_valid, metric] = np.nan
+		if max_valid is not None:
+			sub.loc[sub[metric] >= max_valid, metric] = np.nan
+
+		years = pd.to_numeric(sub["year"], errors="coerce")
+		if years.isna().all():
+			continue
+
+		base = sub[metric].copy()
+		trans = _fit_transform_series(base, transform_mode)
+		trans.index = years.to_numpy()
+
+		# 1) 中间缺口插值
+		interp_year = trans.interpolate(method="index", limit_area="inside")
+		interp = pd.Series(interp_year.to_numpy(), index=sub.index)
+		inside_mask = base.isna() & interp.notna()
+		if inside_mask.any():
+			filled_inside = _inverse_transform_series(interp, transform_mode)
+			sub.loc[inside_mask, metric] = filled_inside.loc[inside_mask]
+			sub.loc[inside_mask, source_col] = interpolation_source
+			sub.loc[inside_mask, imputed_col] = 1
+
+		# 2) 前后缺口多项式拟合
+		updated = pd.to_numeric(sub[metric], errors="coerce")
+		obs_mask = updated.notna()
+		if int(obs_mask.sum()) > 0:
+			x_obs = years.loc[obs_mask].to_numpy(dtype=float)
+			y_obs = _fit_transform_series(updated.loc[obs_mask], transform_mode).to_numpy(dtype=float)
+			deg = int(min(2, len(x_obs) - 1))
+			if deg >= 0:
+				coef = np.polyfit(x_obs, y_obs, deg)
+				poly = np.poly1d(coef)
+				first_obs_year = float(np.min(x_obs))
+				last_obs_year = float(np.max(x_obs))
+
+				missing_mask = updated.isna()
+				edge_mask = missing_mask & ((years < first_obs_year) | (years > last_obs_year))
+				if edge_mask.any():
+					x_edge = years.loc[edge_mask].to_numpy(dtype=float)
+					y_edge = pd.Series(poly(x_edge), index=sub.index[edge_mask])
+					filled_edge = _inverse_transform_series(y_edge, transform_mode)
+					sub.loc[edge_mask, metric] = filled_edge
+					sub.loc[edge_mask, source_col] = polyfit_source
+					sub.loc[edge_mask, imputed_col] = 1
+
+		if max_valid is not None:
+			sub[metric] = sub[metric].clip(lower=min_valid, upper=max_valid)
+		else:
+			sub[metric] = sub[metric].clip(lower=min_valid)
+
+		df.loc[sub.index, [metric, source_col, imputed_col]] = sub[[metric, source_col, imputed_col]]
+
+	df[metric] = pd.to_numeric(df[metric], errors="coerce")
+	df[imputed_col] = pd.to_numeric(df[imputed_col], errors="coerce").fillna(0)
+	return sort_panel_by_province_year(df)
+
+
 def read_provincial_macro_series(
 	items: List[dict],
 	path_keywords: Iterable[str],
@@ -500,95 +586,23 @@ def log_observed_coverage(name: str, df: pd.DataFrame, value_col: str) -> None:
 	)
 
 
-def fill_positive_with_provincial_first(
+def fill_positive_with_provincial_only(
 	panel: pd.DataFrame,
 	value_col: str,
-	national_proxy_series: Optional[VariableSeries],
 	interpolation_source: str,
-	carry_source: str,
-	national_fallback_source: str,
+	polyfit_source: str,
 ) -> pd.DataFrame:
-	"""正值变量补全：省级插值+时序延展优先，国家序列仅在省级全缺时兜底。"""
+	"""正值变量补全：中间缺口插值，前后缺口多项式拟合。"""
 
-	df = panel.copy()
-	df = ensure_metric_columns(df, value_col, include_imputed=True)
-	source_col = f"{value_col}_source"
-	proxy_col = f"{value_col}_is_national_proxy"
-	imputed_col = f"{value_col}_is_imputed"
-	ref_col = f"{value_col}_national_ref"
-
-	if national_proxy_series is not None and not national_proxy_series.data.empty:
-		proxy = national_proxy_series.data.rename(columns={value_col: ref_col})
-		df = df.merge(proxy, on="year", how="left")
-	else:
-		df[ref_col] = np.nan
-
-	for _, idx in df.groupby("province").groups.items():
-		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
-		sub[value_col] = pd.to_numeric(sub[value_col], errors="coerce")
-		sub.loc[sub[value_col] <= 0, value_col] = np.nan
-
-		# 1) 省内内部缺口插值
-		log_series = cast(pd.Series, np.log(sub[value_col].where(sub[value_col] > 0)))
-		log_interp = log_series.interpolate(method="linear", limit_area="inside")
-		inside_mask = sub[value_col].isna() & log_interp.notna()
-		if inside_mask.any():
-			sub.loc[inside_mask, value_col] = np.exp(log_interp.loc[inside_mask])
-			sub.loc[inside_mask, source_col] = interpolation_source
-			sub.loc[inside_mask, proxy_col] = 0
-			sub.loc[inside_mask, imputed_col] = 1
-
-		# 2) 省内边界缺口优先时序延展
-		still_missing = sub[value_col].isna()
-		if still_missing.any():
-			carried = cast(pd.Series, sub[value_col].ffill().bfill())
-			carry_mask = still_missing & carried.notna()
-			if carry_mask.any():
-				sub.loc[carry_mask, value_col] = carried.loc[carry_mask]
-				sub.loc[carry_mask, source_col] = carry_source
-				sub.loc[carry_mask, proxy_col] = 0
-				sub.loc[carry_mask, imputed_col] = 1
-
-		# 3) 仅在省级全缺时，使用国家序列兜底
-		still_missing = sub[value_col].isna()
-		if still_missing.any():
-			ref_ok = sub[ref_col].notna() & (pd.to_numeric(sub[ref_col], errors="coerce") > 0)
-			overlap_mask = sub[value_col].notna() & ref_ok
-			ratio = 1.0
-			if overlap_mask.any():
-				ratios = cast(pd.Series, sub.loc[overlap_mask, value_col] / sub.loc[overlap_mask, ref_col])
-				ratios = ratios.replace([np.inf, -np.inf], np.nan).dropna()
-				if not ratios.empty:
-					ratio = float(np.clip(ratios.median(), 0.05, 20.0))
-
-			fill_with_ref = still_missing & ref_ok
-			if fill_with_ref.any():
-				sub.loc[fill_with_ref, value_col] = pd.to_numeric(sub.loc[fill_with_ref, ref_col], errors="coerce") * ratio
-				sub.loc[fill_with_ref, source_col] = national_fallback_source
-				sub.loc[fill_with_ref, proxy_col] = 1
-				sub.loc[fill_with_ref, imputed_col] = 1
-
-		df.loc[sub.index, [value_col, source_col, proxy_col, imputed_col]] = sub[[
-			value_col,
-			source_col,
-			proxy_col,
-			imputed_col,
-		]]
-
-	df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
-	df[proxy_col] = pd.to_numeric(df[proxy_col], errors="coerce").fillna(0)
-	df[imputed_col] = pd.to_numeric(df[imputed_col], errors="coerce").fillna(0)
-	df = df.drop(columns=[ref_col], errors="ignore")
-	return sort_panel_by_province_year(df)
-
-
-def select_single_sheet_path(items: List[dict], keyword: str) -> Optional[str]:
-	"""按关键词选择单表文件路径。"""
-
-	for it in items:
-		if it.get("sheet_count") == 1 and keyword in it["path"]:
-			return it["path"]
-	return None
+	return fill_series_provincial_only(
+		panel=panel,
+		metric=value_col,
+		transform_mode="log",
+		interpolation_source=interpolation_source,
+		polyfit_source=polyfit_source,
+		min_valid=0.0,
+		max_valid=None,
+	)
 
 
 def select_single_sheet_path_by_keywords(items: List[dict], keywords: Iterable[str]) -> Optional[str]:
@@ -603,168 +617,6 @@ def select_single_sheet_path_by_keywords(items: List[dict], keywords: Iterable[s
 	return None
 
 
-def read_national_series(
-	path_str: str,
-	variable_name: str,
-	source_name: str,
-	indicator_keywords: Iterable[str],
-) -> VariableSeries:
-	"""读取国家层指标序列并抽取目标变量。"""
-
-	wb = load_workbook(path_str, read_only=False, data_only=True)
-	try:
-		ws = wb[wb.sheetnames[0]]
-		header_row = find_header_row(ws)
-		year_cols = parse_year_headers(ws, header_row)
-
-		target_row = None
-		max_row = ws.max_row or 0
-		candidates: List[tuple] = []
-		for ridx in range(header_row + 1, max_row + 1):
-			label = ws.cell(row=ridx, column=1).value
-			if not isinstance(label, str):
-				continue
-			label = label.strip()
-			if not label:
-				continue
-
-			vals = [to_float(ws.cell(row=ridx, column=c).value) for c in year_cols.values()]
-			non_null = sum(v is not None for v in vals)
-			numeric_vals = [v for v in vals if v is not None]
-			std = float(np.std(numeric_vals)) if len(numeric_vals) >= 2 else 0.0
-
-			if any(k in label for k in indicator_keywords):
-				# Rank by coverage first, then by variability to avoid selecting all-100 total rows.
-				candidates.append((non_null, std, ridx))
-
-		if candidates:
-			candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
-			target_row = candidates[0][2]
-
-		if target_row is None:
-			# Fallback: first non-empty numeric row after header.
-			for ridx in range(header_row + 1, max_row + 1):
-				label = ws.cell(row=ridx, column=1).value
-				if not isinstance(label, str) or not label.strip():
-					continue
-				vals = [to_float(ws.cell(row=ridx, column=c).value) for c in year_cols.values()]
-				if any(v is not None for v in vals):
-					target_row = ridx
-					break
-
-		rows: List[dict] = []
-		if target_row is not None:
-			for year, col in sorted(year_cols.items()):
-				rows.append({"year": int(year), variable_name: to_float(ws.cell(row=target_row, column=col).value)})
-
-		df = pd.DataFrame(rows, columns=["year", variable_name])
-		if not df.empty:
-			df = cast(pd.DataFrame, df.loc[(df["year"] >= 1990) & (df["year"] <= 2022), :].copy())
-		return VariableSeries(name=variable_name, source=source_name, data=cast(pd.DataFrame, df))
-	finally:
-		wb.close()
-
-
-def build_national_controls(items: List[dict]) -> List[VariableSeries]:
-	"""构建国家层控制变量序列（用于补全和锚定）。"""
-
-	# National proxies remain needed for fallback and anchoring.
-	gdp_path = select_single_sheet_path_by_keywords(items, ["国家维度", "经济相关", "人均GDP"])
-	population_path = select_single_sheet_path_by_keywords(items, ["国家维度", "人口相关", "年末总人口"])
-	urban_path = select_single_sheet_path_by_keywords(items, ["国家维度", "人口相关", "城镇化率"])
-	industry_path = select_single_sheet_path_by_keywords(items, ["国家维度", "经济相关", "三次产业构成"])
-	energy_path = select_single_sheet_path_by_keywords(items, ["国家维度", "能源相关", "能源消费总量"])
-
-	if gdp_path is None:
-		gdp_path = select_single_sheet_path(items, "GDP")
-
-	series_list: List[VariableSeries] = []
-	if gdp_path:
-		series_list.append(
-			read_national_series(
-				gdp_path,
-				variable_name="GDP",
-				source_name="National_macro_GDP",
-				indicator_keywords=["国民总收入", "国内生产总值", "GDP"],
-			)
-		)
-	if population_path:
-		series_list.append(
-			read_national_series(
-				population_path,
-				variable_name="Population",
-				source_name="National_macro_Population",
-				indicator_keywords=["年末总人口"],
-			)
-		)
-		# Prefer computing urbanization from population components when available.
-		series_list.append(
-			read_national_series(
-				population_path,
-				variable_name="UrbanPopulation",
-				source_name="National_macro_UrbanPopulation",
-				indicator_keywords=["城镇人口"],
-			)
-		)
-	if energy_path:
-		series_list.append(
-			read_national_series(
-				energy_path,
-				variable_name="Energy",
-				source_name="National_macro_Energy",
-				indicator_keywords=["能源消费总量", "总量"],
-			)
-		)
-	if industry_path:
-		series_list.append(
-			read_national_series(
-				industry_path,
-				variable_name="Industry",
-				source_name="National_macro_IndustryShare",
-				indicator_keywords=["第二产业"],
-			)
-		)
-	if urban_path:
-		series_list.append(
-			read_national_series(
-				urban_path,
-				variable_name="Urbanization",
-				source_name="National_macro_Urbanization",
-				indicator_keywords=["城镇化率", "城镇"],
-			)
-		)
-
-	# If direct urbanization series is missing, derive it from urban/total population.
-	name_to_series = {s.name: s for s in series_list}
-	urban_series = name_to_series.get("Urbanization")
-	pop_series = name_to_series.get("Population")
-	urban_pop_series = name_to_series.get("UrbanPopulation")
-	if (
-		(urban_series is None or urban_series.data.empty)
-		and pop_series is not None
-		and urban_pop_series is not None
-		and not pop_series.data.empty
-		and not urban_pop_series.data.empty
-	):
-		merged = pop_series.data.merge(urban_pop_series.data, on="year", how="inner")
-		if not merged.empty:
-			merged["Urbanization"] = (
-			100.0 * pd.to_numeric(merged["UrbanPopulation"], errors="coerce")
-			/ pd.to_numeric(merged["Population"], errors="coerce")
-			)
-			merged["Urbanization"] = merged["Urbanization"].replace([np.inf, -np.inf], np.nan)
-			urb_df = cast(pd.DataFrame, merged.loc[:, ["year", "Urbanization"]].copy())
-			replacement = VariableSeries(
-				name="Urbanization",
-				source="National_macro_Urbanization_from_population",
-				data=urb_df,
-			)
-			if urban_series is None:
-				series_list.append(replacement)
-			else:
-				series_list = [replacement if s.name == "Urbanization" else s for s in series_list]
-
-	return series_list
 
 
 def read_provincial_industry_share(items: List[dict]) -> pd.DataFrame:
@@ -833,119 +685,36 @@ def read_provincial_industry_share(items: List[dict]) -> pd.DataFrame:
 def fill_share_with_provincial_first(
 	panel: pd.DataFrame,
 	metric: str,
-	national_proxy_series: Optional[VariableSeries],
 	interpolation_source: str,
-	carry_source: str,
-	national_fallback_source: str,
-	ratio_clip: Tuple[float, float],
+	polyfit_source: str,
 	observed_col: Optional[str] = None,
 	observed_source: Optional[str] = None,
 ) -> pd.DataFrame:
-	"""占比类变量补全：省级优先，国家序列仅用于最后兜底。"""
+	"""占比类变量补全：中间缺口插值，前后缺口多项式拟合。"""
 
-	df = panel.copy()
-	df = ensure_metric_columns(df, metric, include_imputed=True)
-
-	source_col = f"{metric}_source"
-	proxy_col = f"{metric}_is_national_proxy"
-	imputed_col = f"{metric}_is_imputed"
-	nat_ref_col = f"{metric}_national_ref"
-
-	df[source_col] = df[source_col].astype(object)
-
-	if observed_col and observed_col in df.columns:
-		obs_mask = df[observed_col].notna()
-		df.loc[obs_mask, metric] = pd.to_numeric(df.loc[obs_mask, observed_col], errors="coerce")
-		if observed_source:
-			df.loc[obs_mask, source_col] = observed_source
-		df.loc[obs_mask, proxy_col] = 0
-		df.loc[obs_mask, imputed_col] = 0
-		df = df.drop(columns=[observed_col], errors="ignore")
-
-	if national_proxy_series is not None and not national_proxy_series.data.empty:
-		proxy = national_proxy_series.data.rename(columns={metric: nat_ref_col})
-		df = df.merge(proxy, on="year", how="left")
-	else:
-		df[nat_ref_col] = np.nan
-
-	def clip_share(series: pd.Series) -> pd.Series:
-		return series.clip(lower=0.01, upper=99.99)
-
-	for _, idx in df.groupby("province").groups.items():
-		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
-		sub[metric] = pd.to_numeric(sub[metric], errors="coerce")
-		sub.loc[(sub[metric] <= 0) | (sub[metric] >= 100), metric] = np.nan
-
-		# 1) 省内内部缺口插值。
-		base = clip_share(sub[metric])
-		logit = cast(pd.Series, np.log(base / (100.0 - base)))
-		logit_interp = logit.interpolate(method="linear", limit_area="inside")
-		inside_mask = sub[metric].isna() & logit_interp.notna()
-		if inside_mask.any():
-			sub.loc[inside_mask, metric] = 100.0 / (1.0 + np.exp(-logit_interp.loc[inside_mask]))
-			sub.loc[inside_mask, source_col] = interpolation_source
-			sub.loc[inside_mask, proxy_col] = 0
-			sub.loc[inside_mask, imputed_col] = 1
-
-		# 2) 边界缺口优先用省内时序延展。
-		still_missing = sub[metric].isna()
-		if still_missing.any():
-			carried = cast(pd.Series, sub[metric].ffill().bfill())
-			carry_mask = still_missing & carried.notna()
-			if carry_mask.any():
-				sub.loc[carry_mask, metric] = np.clip(carried.loc[carry_mask], 0.01, 99.99)
-				sub.loc[carry_mask, source_col] = carry_source
-				sub.loc[carry_mask, proxy_col] = 0
-				sub.loc[carry_mask, imputed_col] = 1
-
-		# 3) 仅在省级仍缺失时用国家序列兜底。
-		still_missing = sub[metric].isna()
-		if still_missing.any():
-			ref_ok = sub[nat_ref_col].notna() & (sub[nat_ref_col] > 0)
-			overlap_mask = sub[metric].notna() & ref_ok
-			ratio = 1.0
-			if overlap_mask.any():
-				ratios = cast(pd.Series, sub.loc[overlap_mask, metric] / sub.loc[overlap_mask, nat_ref_col])
-				ratios = ratios.replace([np.inf, -np.inf], np.nan).dropna()
-				if not ratios.empty:
-					ratio = float(np.clip(ratios.median(), ratio_clip[0], ratio_clip[1]))
-
-			fill_with_ref = still_missing & ref_ok
-			if fill_with_ref.any():
-				sub.loc[fill_with_ref, metric] = np.clip(
-					sub.loc[fill_with_ref, nat_ref_col] * ratio,
-					0.01,
-					99.99,
-				)
-				sub.loc[fill_with_ref, source_col] = national_fallback_source
-				sub.loc[fill_with_ref, proxy_col] = 1
-				sub.loc[fill_with_ref, imputed_col] = 1
-
-		df.loc[sub.index, [metric, source_col, proxy_col, imputed_col]] = sub[
-			[metric, source_col, proxy_col, imputed_col]
-		]
-
-	df = df.drop(columns=[nat_ref_col], errors="ignore")
-	df[metric] = pd.to_numeric(df[metric], errors="coerce")
-	df[proxy_col] = pd.to_numeric(df[proxy_col], errors="coerce").fillna(0)
-	df[imputed_col] = pd.to_numeric(df[imputed_col], errors="coerce").fillna(0)
-	return sort_panel_by_province_year(df)
+	return fill_series_provincial_only(
+		panel=panel,
+		metric=metric,
+		transform_mode="logit",
+		interpolation_source=interpolation_source,
+		polyfit_source=polyfit_source,
+		min_valid=0.0,
+		max_valid=100.0,
+		observed_col=observed_col,
+		observed_source=observed_source,
+	)
 
 
 def fill_industry_with_interpolation_fit_and_anchor(
 	panel: pd.DataFrame,
-	industry_proxy_series: Optional[VariableSeries],
 ) -> pd.DataFrame:
-	"""按省级优先原则补全Industry，国家序列仅做最后兜底。"""
+	"""按省级规则补全Industry。"""
 
 	return fill_share_with_provincial_first(
 		panel=panel,
 		metric="Industry",
-		national_proxy_series=industry_proxy_series,
 		interpolation_source="Provincial_industry_logit_interpolation",
-		carry_source="Provincial_industry_temporal_carry_fill",
-		national_fallback_source="Industry_national_fallback_no_provincial_obs",
-		ratio_clip=(0.2, 5.0),
+		polyfit_source="Provincial_industry_logit_polynomial_fit",
 	)
 
 
@@ -1012,182 +781,30 @@ def read_provincial_urbanization_share(items: List[dict]) -> pd.DataFrame:
 
 def fill_urbanization_with_interpolation_fit_and_anchor(
 	panel: pd.DataFrame,
-	urbanization_proxy_series: Optional[VariableSeries],
 ) -> pd.DataFrame:
-	"""按省级优先原则补全Urbanization，国家序列仅做最后兜底。"""
+	"""按省级规则补全Urbanization。"""
 
 	return fill_share_with_provincial_first(
 		panel=panel,
 		metric="Urbanization",
-		national_proxy_series=urbanization_proxy_series,
 		interpolation_source="Provincial_urbanization_logit_interpolation",
-		carry_source="Provincial_urbanization_temporal_carry_fill",
-		national_fallback_source="Urbanization_national_fallback_no_provincial_obs",
-		ratio_clip=(0.2, 5.0),
+		polyfit_source="Provincial_urbanization_logit_polynomial_fit",
 		observed_col="Urbanization_prov",
 		observed_source="Provincial_urbanization_share_1990_2025_observed",
 	)
 
 
-def safe_log(s: pd.Series) -> pd.Series:
-	"""仅对正值取对数，其余保留为空。"""
-
-	return cast(pd.Series, np.log(s.where(s > 0)))
-
-
-def add_kaya_features(panel: pd.DataFrame) -> pd.DataFrame:
-	"""基于原始变量构造Kaya恒等式分解因子。"""
-
-	df = panel.copy()
-	df["A"] = df["GDP"] / df["Population"]
-	df["B"] = df["Energy"] / df["GDP"]
-	df["C"] = df["CO2"] / df["Energy"]
-
-	df["ln_CO2"] = safe_log(df["CO2"])
-	df["ln_Population"] = safe_log(df["Population"])
-	df["ln_A"] = safe_log(df["A"])
-	df["ln_B"] = safe_log(df["B"])
-	df["ln_C"] = safe_log(df["C"])
-	return df
-
-
-def log_mean(a: float, b: float) -> Optional[float]:
-	"""计算LMDI使用的对数平均权重。"""
-
-	if a is None or b is None:
-		return None
-	if a <= 0 or b <= 0:
-		return None
-	if abs(a - b) < 1e-12:
-		return float(a)
-	da = np.log(a)
-	db = np.log(b)
-	if abs(da - db) < 1e-12:
-		return float(a)
-	return float((a - b) / (da - db))
-
-
-def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
-	"""按省份逐年计算LMDI时序分解结果。"""
-
-	rows: List[dict] = []
-
-	for province, g in panel.sort_values(["province", "year"]).groupby("province"):
-		g = g.reset_index(drop=True)
-		for i in range(1, len(g)):
-			prev = g.iloc[i - 1]
-			curr = g.iloc[i]
-
-			e0, et = prev["CO2"], curr["CO2"]
-			p0, pt = prev["Population"], curr["Population"]
-			a0, at = prev["A"], curr["A"]
-			b0, bt = prev["B"], curr["B"]
-			c0, ct = prev["C"], curr["C"]
-
-			valid = all(
-				pd.notna(v) and float(v) > 0
-				for v in [e0, et, p0, pt, a0, at, b0, bt, c0, ct]
-			)
-			if not valid:
-				continue
-
-			lm = log_mean(float(et), float(e0))
-			if lm is None:
-				continue
-
-			d_p = lm * np.log(float(pt) / float(p0))
-			d_a = lm * np.log(float(at) / float(a0))
-			d_b = lm * np.log(float(bt) / float(b0))
-			d_c = lm * np.log(float(ct) / float(c0))
-			d_co2 = float(et) - float(e0)
-			resid = d_co2 - (d_p + d_a + d_b + d_c)
-
-			rows.append(
-				{
-					"province": province,
-					"year": int(curr["year"]),
-					"base_year": int(prev["year"]),
-					"delta_CO2": d_co2,
-					"delta_P": d_p,
-					"delta_A": d_a,
-					"delta_B": d_b,
-					"delta_C": d_c,
-					"lmdi_residual": resid,
-				}
-			)
-
-	return pd.DataFrame(rows)
-
-
 def fill_energy_with_interpolation_and_fit(
 	panel: pd.DataFrame,
-	energy_proxy_series: Optional[VariableSeries],
 ) -> pd.DataFrame:
-	"""按省级优先原则补全Energy，国家序列仅做最后兜底。"""
+	"""按省级规则补全Energy。"""
 
-	df = panel.copy()
-	df = ensure_metric_columns(df, "Energy", include_imputed=True)
-
-	if energy_proxy_series is not None and not energy_proxy_series.data.empty:
-		proxy = energy_proxy_series.data.rename(columns={"Energy": "Energy_national_ref"})
-		df = df.merge(proxy, on="year", how="left")
-	else:
-		df["Energy_national_ref"] = np.nan
-
-	for _, idx in df.groupby("province").groups.items():
-		sub = cast(pd.DataFrame, df.loc[list(idx), :].sort_values("year").copy())
-		sub["Energy"] = pd.to_numeric(sub["Energy"], errors="coerce")
-		sub.loc[sub["Energy"] <= 0, "Energy"] = np.nan
-
-		# 1) In-series interpolation in log space for internal gaps.
-		log_energy = cast(pd.Series, np.log(sub["Energy"].where(sub["Energy"] > 0)))
-		log_interp = log_energy.interpolate(method="linear", limit_area="inside")
-		inside_mask = sub["Energy"].isna() & log_interp.notna()
-		if inside_mask.any():
-			sub.loc[inside_mask, "Energy"] = np.exp(log_interp.loc[inside_mask])
-			sub.loc[inside_mask, "Energy_source"] = "Provincial_energy_log_interpolation"
-			sub.loc[inside_mask, "Energy_is_national_proxy"] = 0
-			sub.loc[inside_mask, "Energy_is_imputed"] = 1
-
-		# 2) 边界缺口优先使用省内时序延展。
-		still_missing = sub["Energy"].isna()
-		if still_missing.any():
-			carried = cast(pd.Series, sub["Energy"].ffill().bfill())
-			carry_mask = still_missing & carried.notna()
-			if carry_mask.any():
-				sub.loc[carry_mask, "Energy"] = carried.loc[carry_mask]
-				sub.loc[carry_mask, "Energy_source"] = "Provincial_energy_temporal_carry_fill"
-				sub.loc[carry_mask, "Energy_is_national_proxy"] = 0
-				sub.loc[carry_mask, "Energy_is_imputed"] = 1
-
-		# 3) 仅在省级全缺时，使用国家序列兜底。
-		still_missing = sub["Energy"].isna()
-		if still_missing.any():
-			ref_ok = sub["Energy_national_ref"].notna() & (sub["Energy_national_ref"] > 0)
-			overlap_mask = sub["Energy"].notna() & ref_ok
-			ratio = 1.0
-			if overlap_mask.any():
-				ratios = cast(pd.Series, sub.loc[overlap_mask, "Energy"] / sub.loc[overlap_mask, "Energy_national_ref"])
-				ratios = ratios.replace([np.inf, -np.inf], np.nan).dropna()
-				if not ratios.empty:
-					ratio = float(np.clip(ratios.median(), 0.05, 20.0))
-
-			fill_with_ref = still_missing & ref_ok
-			if fill_with_ref.any():
-				sub.loc[fill_with_ref, "Energy"] = sub.loc[fill_with_ref, "Energy_national_ref"] * ratio
-				sub.loc[fill_with_ref, "Energy_source"] = "Energy_national_fallback_no_provincial_obs"
-				sub.loc[fill_with_ref, "Energy_is_national_proxy"] = 1
-				sub.loc[fill_with_ref, "Energy_is_imputed"] = 1
-
-		df.loc[sub.index, ["Energy", "Energy_source", "Energy_is_national_proxy", "Energy_is_imputed"]] = sub[
-			["Energy", "Energy_source", "Energy_is_national_proxy", "Energy_is_imputed"]
-		]
-
-	df["Energy"] = pd.to_numeric(df["Energy"], errors="coerce")
-	df["Energy_is_national_proxy"] = df["Energy_is_national_proxy"].fillna(0)
-	df["Energy_is_imputed"] = df["Energy_is_imputed"].fillna(0)
-	df = df.drop(columns=["Energy_national_ref"], errors="ignore")
-	return sort_panel_by_province_year(df)
+	return fill_positive_with_provincial_only(
+		panel=panel,
+		value_col="Energy",
+		interpolation_source="Provincial_energy_log_interpolation",
+		polyfit_source="Provincial_energy_log_polynomial_fit",
+	)
 
 
 def main() -> None:
@@ -1213,62 +830,50 @@ def main() -> None:
 	if not prov_population.empty:
 		panel = panel.merge(prov_population, on=["province", "year"], how="left")
 
-	log_progress("阶段3/7：构建国家兜底序列（仅缺口兜底）")
-	controls = build_national_controls(items)
-	log_progress(f"国家兜底序列准备完成，变量数 {len(controls)}")
-	gdp_proxy_series = get_control_series(controls, "GDP")
-	population_proxy_series = get_control_series(controls, "Population")
-	energy_proxy_series = get_control_series(controls, "Energy")
-	industry_proxy_series = get_control_series(controls, "Industry")
-	urbanization_proxy_series = get_control_series(controls, "Urbanization")
-
-	panel = fill_positive_with_provincial_first(
+	log_progress("阶段3/6：补全GDP与Population（省内插值+前后多项式拟合）")
+	panel = fill_positive_with_provincial_only(
 		panel,
 		value_col="GDP",
-		national_proxy_series=gdp_proxy_series,
 		interpolation_source="Provincial_GDP_log_interpolation",
-		carry_source="Provincial_GDP_temporal_carry_fill",
-		national_fallback_source="GDP_national_fallback_no_provincial_obs",
+		polyfit_source="Provincial_GDP_log_polynomial_fit",
 	)
-	panel = fill_positive_with_provincial_first(
+	panel = fill_positive_with_provincial_only(
 		panel,
 		value_col="Population",
-		national_proxy_series=population_proxy_series,
 		interpolation_source="Provincial_population_log_interpolation",
-		carry_source="Provincial_population_temporal_carry_fill",
-		national_fallback_source="Population_national_fallback_no_provincial_obs",
+		polyfit_source="Provincial_population_log_polynomial_fit",
 	)
 
-	log_progress("阶段4/7：补全Industry")
+	log_progress("阶段4/6：补全Industry")
 	prov_industry = read_provincial_industry_share(items)
 	log_observed_coverage("Industry", prov_industry, "Industry")
 	if not prov_industry.empty:
 		panel = panel.merge(prov_industry, on=["province", "year"], how="left")
 	panel = ensure_metric_columns(panel, "Industry", include_imputed=True)
 
-	panel = fill_industry_with_interpolation_fit_and_anchor(panel, industry_proxy_series)
+	panel = fill_industry_with_interpolation_fit_and_anchor(panel)
 
-	log_progress("阶段5/7：补全Urbanization")
+	log_progress("阶段5/6：补全Urbanization")
 	prov_urbanization = read_provincial_urbanization_share(items)
 	log_observed_coverage("Urbanization", prov_urbanization, "Urbanization_prov")
 	if not prov_urbanization.empty:
 		panel = panel.merge(prov_urbanization, on=["province", "year"], how="left")
 	panel = ensure_metric_columns(panel, "Urbanization", include_imputed=True)
 
-	panel = fill_urbanization_with_interpolation_fit_and_anchor(panel, urbanization_proxy_series)
+	panel = fill_urbanization_with_interpolation_fit_and_anchor(panel)
 
-	log_progress("阶段6/7：补全Energy")
+	log_progress("阶段6/6：补全Energy")
 	prov_energy = read_provincial_energy_inventory(items)
 	log_observed_coverage("Energy", prov_energy, "Energy")
 	if not prov_energy.empty:
 		panel = panel.merge(prov_energy, on=["province", "year"], how="left")
 	panel = ensure_metric_columns(panel, "Energy", include_imputed=True)
 
-	panel = fill_energy_with_interpolation_and_fit(panel, energy_proxy_series)
+	panel = fill_energy_with_interpolation_and_fit(panel)
 
-	panel["Energy_is_national_proxy"] = panel["Energy_is_national_proxy"].fillna(0)
-	panel["Energy_is_imputed"] = panel["Energy_is_imputed"].fillna(0)
-	panel = add_kaya_features(panel)
+	panel["A"] = panel["GDP"] / panel["Population"]
+	panel["B"] = panel["Energy"] / panel["GDP"]
+	panel["C"] = panel["CO2"] / panel["Energy"]
 
 	core_cols = [
 		"province",
@@ -1289,21 +894,18 @@ def main() -> None:
 	# Keep rows where CO2 exists; remaining variables are filled by available controls.
 	panel_core = sort_panel_by_province_year(panel_core)
 
-	log_progress("阶段7/7：计算LMDI并写出文件")
-	lmdi_df = compute_lmdi_time(panel_core)
+	log_progress("写出结果文件（LMDI已按要求暂时移除）")
 
 	panel_path = OUT_DIR / "panel_master.csv"
-	lmdi_path = OUT_DIR / "lmdi_decomposition.csv"
 	audit_path = OUT_DIR / "panel_source_audit.csv"
 	summary_path = OUT_DIR / "panel_build_summary.json"
 
 	panel_core.to_csv(panel_path, index=False, encoding="utf-8-sig")
-	lmdi_df.to_csv(lmdi_path, index=False, encoding="utf-8-sig")
 
 	audit_cols = [
 		c
 		for c in panel.columns
-		if c.endswith("_source") or c.endswith("_is_national_proxy") or c.endswith("_is_imputed")
+		if c.endswith("_source") or c.endswith("_is_imputed")
 	]
 	panel[["province", "year", "CO2"] + audit_cols].to_csv(audit_path, index=False, encoding="utf-8-sig")
 
@@ -1333,9 +935,9 @@ def main() -> None:
 		else {},
 		"notes": [
 			"CO2 uses MEIC provincial total emissions only (1990-2023).",
-			"GDP and Population are read from provincial files first; fill order is in-province interpolation, temporal carry, and national fallback only if still missing.",
-			"Energy uses provincial inventory (1997-2022); fill order is in-province log interpolation, temporal carry, and national fallback only if still missing.",
-			"Industry and Urbanization use provincial share series first; fill order is in-province logit interpolation, temporal carry, and national fallback only if still missing.",
+			"All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
+			"No national fallback is used in this build.",
+			"LMDI decomposition is temporarily disabled.",
 			"Panel rows are always output in stable province-year order.",
 		],
 	}
@@ -1343,7 +945,6 @@ def main() -> None:
 
 	log_progress("预处理流程完成")
 	print("WROTE", panel_path)
-	print("WROTE", lmdi_path)
 	print("WROTE", audit_path)
 	print("WROTE", summary_path)
 	print("PANEL_ROWS", summary["panel_rows"], "PROVINCES", summary["province_count"], "YEARS", summary["year_min"], summary["year_max"])

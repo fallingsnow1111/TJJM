@@ -17,6 +17,43 @@ SUMMARY_JSON = PROJECT_ROOT / "Code" / "dataset_index_summary.json"
 OUT_DIR = PROJECT_ROOT / "Code" / "output"
 
 
+# Conversion factors to standard coal equivalent (10^4 tce per original unit in inventory row).
+# Example: values in 10^4 ton multiply by tce/ton; values in 10^8 kWh multiply by 1.229.
+ENERGY_TCE_FACTOR = {
+	"Raw_Coal": 0.7143,
+	"Cleaned_Coal": 0.9000,
+	"Other_Washed_Coal": 0.2857,
+	"Briquettes": 0.6000,
+	"Coke": 0.9714,
+	"Coke_Oven_Gas": 6.1430,
+	"Other_Gas": 1.3300,
+	"Other_Coking_Products": 1.1143,
+	"Crude_Oil": 1.4286,
+	"Gasoline": 1.4714,
+	"Kerosene": 1.4714,
+	"Diesel_Oil": 1.4571,
+	"Fuel_Oil": 1.4286,
+	"LPG": 1.7143,
+	"Refinery_Gas": 1.5714,
+	"Other_Petroleum_Products": 1.4286,
+	"Natural_Gas": 13.3000,
+	"Heat": 0.03412,
+	"Electricity": 1.2290,
+	"Other_Energy": 1.0000,
+}
+
+COAL_FUEL_HEADERS = {
+	"Raw_Coal",
+	"Cleaned_Coal",
+	"Other_Washed_Coal",
+	"Briquettes",
+	"Coke",
+	"Coke_Oven_Gas",
+	"Other_Gas",
+	"Other_Coking_Products",
+}
+
+
 # Canonical province names aligned to inventory/MEIC naming.
 PROVINCE_ALIAS = {
 	"beijing": "Beijing",
@@ -309,7 +346,7 @@ def build_co2_panel(items: List[dict]) -> pd.DataFrame:
 
 
 def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
-	"""读取省级能源清单并汇总总终端消费作为Energy。"""
+	"""读取省级能源清单并按折标煤汇总Energy，同时计算煤炭消费占比CoalShare。"""
 
 	records: List[dict] = []
 
@@ -354,18 +391,43 @@ def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
 				if total_row is None:
 					continue
 
-				vals = [to_float(ws.cell(row=total_row, column=c).value) for c in range(2, max_col + 1)]
-				nums = [float(v) for v in vals if v is not None and np.isfinite(v)]
-				if not nums:
+				total_tce = 0.0
+				coal_tce = 0.0
+				has_effective_value = False
+				for c in range(2, max_col + 1):
+					header = ws.cell(row=1, column=c).value
+					if not isinstance(header, str):
+						continue
+					header = header.strip()
+					factor = ENERGY_TCE_FACTOR.get(header)
+					if factor is None:
+						continue
+
+					v = to_float(ws.cell(row=total_row, column=c).value)
+					if v is None or not np.isfinite(v):
+						continue
+
+					contrib_tce = float(v) * float(factor)
+					total_tce += contrib_tce
+					has_effective_value = True
+					if header in COAL_FUEL_HEADERS:
+						coal_tce += contrib_tce
+
+				if not has_effective_value or total_tce <= 0:
 					continue
+
+				coal_share = (coal_tce / total_tce) * 100.0 if total_tce > 0 else np.nan
 
 				records.append(
 					{
 						"province": province,
 						"year": int(year),
-						"Energy": float(np.nansum(nums)),
-						"Energy_source": "Provincial_energy_inventory_1997_2022_total_final_consumption_sum",
+						"Energy": float(total_tce),
+						"Energy_source": "Provincial_energy_inventory_1997_2022_total_final_consumption_tce_converted",
 						"Energy_is_national_proxy": 0,
+						"CoalShare": float(coal_share),
+						"CoalShare_source": "Provincial_coal_share_from_total_final_consumption_tce_converted",
+						"CoalShare_is_national_proxy": 0,
 					}
 				)
 		finally:
@@ -373,7 +435,18 @@ def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
 
 	df = pd.DataFrame(records)
 	if df.empty:
-		return pd.DataFrame(columns=["province", "year", "Energy", "Energy_source", "Energy_is_national_proxy"])
+		return pd.DataFrame(
+			columns=[
+				"province",
+				"year",
+				"Energy",
+				"Energy_source",
+				"Energy_is_national_proxy",
+				"CoalShare",
+				"CoalShare_source",
+				"CoalShare_is_national_proxy",
+			]
+		)
 
 	df = df.sort_values(["province", "year"]).drop_duplicates(subset=["province", "year"], keep="last")
 	return df.reset_index(drop=True)
@@ -807,6 +880,177 @@ def fill_energy_with_interpolation_and_fit(
 	)
 
 
+def fill_coal_share_with_interpolation_and_fit(
+	panel: pd.DataFrame,
+) -> pd.DataFrame:
+	"""按省级规则补全CoalShare。"""
+
+	return fill_share_with_provincial_first(
+		panel=panel,
+		metric="CoalShare",
+		interpolation_source="Provincial_coal_share_logit_interpolation",
+		polyfit_source="Provincial_coal_share_logit_polynomial_fit",
+	)
+
+
+def read_provincial_transport_mileage_and_private_cars(items: List[dict]) -> pd.DataFrame:
+	"""读取省级交通数据并提取HighwayMileage与PrivateCars观测值。"""
+
+	path_str = select_single_sheet_path_by_keywords(items, ["省份维度", "交通相关", "里程和汽车拥有量省份数据"])
+	transport_path: Optional[Path] = None
+	if path_str:
+		candidate = PROJECT_ROOT / path_str
+		if candidate.exists():
+			transport_path = candidate
+
+	if transport_path is None:
+		fallback_paths = sorted((DATASET_ROOT / "省份维度" / "交通相关").glob("*里程和汽车拥有量省份数据*.xlsx"))
+		if fallback_paths:
+			transport_path = fallback_paths[0]
+
+	if transport_path is None:
+		return pd.DataFrame(
+			columns=[
+				"province",
+				"year",
+				"HighwayMileage",
+				"HighwayMileage_source",
+				"HighwayMileage_is_national_proxy",
+				"PrivateCars",
+				"PrivateCars_source",
+				"PrivateCars_is_national_proxy",
+			]
+		)
+
+	wb = load_workbook(transport_path, read_only=False, data_only=True)
+	try:
+		ws = wb[wb.sheetnames[0]]
+
+		year_cols: Dict[int, int] = {}
+		for col in range(3, int(ws.max_column or 0) + 1):
+			year = parse_year_cell(ws.cell(row=1, column=col).value)
+			if year is not None and 1990 <= int(year) <= 2023:
+				year_cols[int(year)] = col
+
+		if not year_cols:
+			return pd.DataFrame(
+				columns=[
+					"province",
+					"year",
+					"HighwayMileage",
+					"HighwayMileage_source",
+					"HighwayMileage_is_national_proxy",
+					"PrivateCars",
+					"PrivateCars_source",
+					"PrivateCars_is_national_proxy",
+				]
+			)
+
+		highway_records: List[dict] = []
+		car_records: List[dict] = []
+		last_indicator: Optional[str] = None
+		used_railway_mileage = False
+		used_civil_car = False
+
+		for ridx in range(2, int(ws.max_row or 0) + 1):
+			indicator_cell = ws.cell(row=ridx, column=1).value
+			if isinstance(indicator_cell, str) and indicator_cell.strip():
+				last_indicator = indicator_cell.strip()
+			indicator = last_indicator
+			province_raw = ws.cell(row=ridx, column=2).value
+			if not isinstance(indicator, str):
+				continue
+			if not isinstance(province_raw, str):
+				continue
+
+			indicator_compact = re.sub(r"\s+", "", indicator)
+			province = normalize_province_name(province_raw)
+			if not province:
+				continue
+
+			is_highway = "公路" in indicator_compact and "里程" in indicator_compact
+			is_railway_fallback = "铁路" in indicator_compact and "里程" in indicator_compact
+			is_private_cars = "私家车" in indicator_compact and "拥有量" in indicator_compact
+			is_civil_car_fallback = "民用汽车" in indicator_compact and "拥有量" in indicator_compact
+
+			for year, col in sorted(year_cols.items()):
+				v = to_float(ws.cell(row=ridx, column=col).value)
+				if v is None:
+					continue
+
+				if is_highway or is_railway_fallback:
+					source_name = "Provincial_highway_mileage_1990_2024_observed"
+					if is_railway_fallback and not is_highway:
+						source_name = "Provincial_railway_mileage_1990_2024_used_as_highway_proxy"
+						used_railway_mileage = True
+					highway_records.append(
+						{
+							"province": province,
+							"year": int(year),
+							"HighwayMileage": float(v),
+							"HighwayMileage_source": source_name,
+							"HighwayMileage_is_national_proxy": 0,
+						}
+					)
+
+				if is_private_cars or is_civil_car_fallback:
+					source_name = "Provincial_private_cars_1990_2024_observed"
+					if is_civil_car_fallback and not is_private_cars:
+						source_name = "Provincial_civil_car_1990_2024_used_as_private_cars_proxy"
+						used_civil_car = True
+					car_records.append(
+						{
+							"province": province,
+							"year": int(year),
+							"PrivateCars": float(v),
+							"PrivateCars_source": source_name,
+							"PrivateCars_is_national_proxy": 0,
+						}
+					)
+	finally:
+		wb.close()
+
+	if used_railway_mileage:
+		log_progress("交通口径提示：未发现公路里程，当前使用铁路营业里程作为HighwayMileage代理。")
+	if used_civil_car:
+		log_progress("交通口径提示：未发现私家车数量，当前使用民用汽车拥有量作为PrivateCars代理。")
+
+	highway_df = pd.DataFrame(highway_records)
+	car_df = pd.DataFrame(car_records)
+
+	if highway_df.empty:
+		highway_df = pd.DataFrame(
+			columns=["province", "year", "HighwayMileage", "HighwayMileage_source", "HighwayMileage_is_national_proxy"]
+		)
+	else:
+		highway_df = highway_df.sort_values(["province", "year"]).drop_duplicates(
+			subset=["province", "year"],
+			keep="last",
+		)
+
+	if car_df.empty:
+		car_df = pd.DataFrame(columns=["province", "year", "PrivateCars", "PrivateCars_source", "PrivateCars_is_national_proxy"])
+	else:
+		car_df = car_df.sort_values(["province", "year"]).drop_duplicates(subset=["province", "year"], keep="last")
+
+	out = highway_df.merge(car_df, on=["province", "year"], how="outer")
+	if out.empty:
+		return pd.DataFrame(
+			columns=[
+				"province",
+				"year",
+				"HighwayMileage",
+				"HighwayMileage_source",
+				"HighwayMileage_is_national_proxy",
+				"PrivateCars",
+				"PrivateCars_source",
+				"PrivateCars_is_national_proxy",
+			]
+		)
+
+	return out.sort_values(["province", "year"]).reset_index(drop=True)
+
+
 def main() -> None:
 	"""执行数据预处理主流程并写出结果文件。"""
 
@@ -830,7 +1074,7 @@ def main() -> None:
 	if not prov_population.empty:
 		panel = panel.merge(prov_population, on=["province", "year"], how="left")
 
-	log_progress("阶段3/6：补全GDP与Population（省内插值+前后多项式拟合）")
+	log_progress("阶段3/7：补全GDP与Population（省内插值+前后多项式拟合）")
 	panel = fill_positive_with_provincial_only(
 		panel,
 		value_col="GDP",
@@ -844,7 +1088,7 @@ def main() -> None:
 		polyfit_source="Provincial_population_log_polynomial_fit",
 	)
 
-	log_progress("阶段4/6：补全Industry")
+	log_progress("阶段4/7：补全Industry")
 	prov_industry = read_provincial_industry_share(items)
 	log_observed_coverage("Industry", prov_industry, "Industry")
 	if not prov_industry.empty:
@@ -853,7 +1097,7 @@ def main() -> None:
 
 	panel = fill_industry_with_interpolation_fit_and_anchor(panel)
 
-	log_progress("阶段5/6：补全Urbanization")
+	log_progress("阶段5/7：补全Urbanization")
 	prov_urbanization = read_provincial_urbanization_share(items)
 	log_observed_coverage("Urbanization", prov_urbanization, "Urbanization_prov")
 	if not prov_urbanization.empty:
@@ -862,14 +1106,39 @@ def main() -> None:
 
 	panel = fill_urbanization_with_interpolation_fit_and_anchor(panel)
 
-	log_progress("阶段6/6：补全Energy")
+	log_progress("阶段6/7：补全Energy与CoalShare")
 	prov_energy = read_provincial_energy_inventory(items)
 	log_observed_coverage("Energy", prov_energy, "Energy")
+	log_observed_coverage("CoalShare", prov_energy, "CoalShare")
 	if not prov_energy.empty:
 		panel = panel.merge(prov_energy, on=["province", "year"], how="left")
 	panel = ensure_metric_columns(panel, "Energy", include_imputed=True)
+	panel = ensure_metric_columns(panel, "CoalShare", include_imputed=True)
 
 	panel = fill_energy_with_interpolation_and_fit(panel)
+	panel = fill_coal_share_with_interpolation_and_fit(panel)
+
+	log_progress("阶段7/7：补全交通变量（HighwayMileage, PrivateCars）")
+	prov_transport = read_provincial_transport_mileage_and_private_cars(items)
+	log_observed_coverage("HighwayMileage", prov_transport, "HighwayMileage")
+	log_observed_coverage("PrivateCars", prov_transport, "PrivateCars")
+	if not prov_transport.empty:
+		panel = panel.merge(prov_transport, on=["province", "year"], how="left")
+	panel = ensure_metric_columns(panel, "HighwayMileage", include_imputed=True)
+	panel = ensure_metric_columns(panel, "PrivateCars", include_imputed=True)
+
+	panel = fill_positive_with_provincial_only(
+		panel,
+		value_col="HighwayMileage",
+		interpolation_source="Provincial_highway_mileage_log_interpolation",
+		polyfit_source="Provincial_highway_mileage_log_polynomial_fit",
+	)
+	panel = fill_positive_with_provincial_only(
+		panel,
+		value_col="PrivateCars",
+		interpolation_source="Provincial_private_cars_log_interpolation",
+		polyfit_source="Provincial_private_cars_log_polynomial_fit",
+	)
 
 	panel["A"] = panel["GDP"] / panel["Population"]
 	panel["B"] = panel["Energy"] / panel["GDP"]
@@ -882,8 +1151,11 @@ def main() -> None:
 		"GDP",
 		"Population",
 		"Energy",
+		"CoalShare",
 		"Industry",
 		"Urbanization",
+		"HighwayMileage",
+		"PrivateCars",
 		"A",
 		"B",
 		"C",
@@ -894,7 +1166,7 @@ def main() -> None:
 	# Keep rows where CO2 exists; remaining variables are filled by available controls.
 	panel_core = sort_panel_by_province_year(panel_core)
 
-	log_progress("写出结果文件（LMDI已按要求暂时移除）")
+	log_progress("写出结果文件")
 
 	panel_path = OUT_DIR / "panel_master.csv"
 	audit_path = OUT_DIR / "panel_source_audit.csv"
@@ -917,7 +1189,20 @@ def main() -> None:
 		"co2_source_counts": panel_core["CO2_source"].value_counts(dropna=False).to_dict(),
 		"missing_ratio": {
 			c: float(panel_core[c].isna().mean())
-			for c in ["CO2", "GDP", "Population", "Energy", "Industry", "Urbanization", "A", "B", "C"]
+			for c in [
+				"CO2",
+				"GDP",
+				"Population",
+				"Energy",
+				"CoalShare",
+				"Industry",
+				"Urbanization",
+				"HighwayMileage",
+				"PrivateCars",
+				"A",
+				"B",
+				"C",
+			]
 			if c in panel_core.columns
 		},
 		"gdp_source_counts": panel["GDP_source"].value_counts(dropna=False).to_dict() if "GDP_source" in panel.columns else {},
@@ -927,17 +1212,28 @@ def main() -> None:
 		"energy_source_counts": panel["Energy_source"].value_counts(dropna=False).to_dict()
 		if "Energy_source" in panel.columns
 		else {},
+		"coal_share_source_counts": panel["CoalShare_source"].value_counts(dropna=False).to_dict()
+		if "CoalShare_source" in panel.columns
+		else {},
 		"industry_source_counts": panel["Industry_source"].value_counts(dropna=False).to_dict()
 		if "Industry_source" in panel.columns
 		else {},
 		"urbanization_source_counts": panel["Urbanization_source"].value_counts(dropna=False).to_dict()
 		if "Urbanization_source" in panel.columns
 		else {},
+		"highway_mileage_source_counts": panel["HighwayMileage_source"].value_counts(dropna=False).to_dict()
+		if "HighwayMileage_source" in panel.columns
+		else {},
+		"private_cars_source_counts": panel["PrivateCars_source"].value_counts(dropna=False).to_dict()
+		if "PrivateCars_source" in panel.columns
+		else {},
 		"notes": [
 			"CO2 uses MEIC provincial total emissions only (1990-2023).",
+			"Energy is aggregated after converting fuel-specific total final consumption into standard coal equivalent (tce).",
+			"CoalShare is defined as coal-group tce divided by total final consumption tce.",
 			"All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
 			"No national fallback is used in this build.",
-			"LMDI decomposition is temporarily disabled.",
+			"HighwayMileage and PrivateCars are integrated from provincial transport dataset.",
 			"Panel rows are always output in stable province-year order.",
 		],
 	}

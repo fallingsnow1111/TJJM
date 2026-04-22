@@ -11,8 +11,11 @@
     "GDP": 0.0,
     "Population": 0.0,
     "Energy": 0.0,
+    "CoalShare": 0.0,
     "Industry": 0.0,
     "Urbanization": 0.0,
+    "HighwayMileage": 0.0,
+    "PrivateCars": 0.0,
     "A": 0.0,
     "B": 0.0,
     "C": 0.0
@@ -25,9 +28,14 @@
     "Provincial_population_log_interpolation": 1
   },
   "energy_source_counts": {
-    "Provincial_energy_inventory_1997_2022_total_final_consumption_sum": 776,
+    "Provincial_energy_inventory_1997_2022_total_final_consumption_tce_converted": 776,
     "Provincial_energy_log_polynomial_fit": 240,
     "Provincial_energy_log_interpolation": 4
+  },
+  "coal_share_source_counts": {
+    "Provincial_coal_share_from_total_final_consumption_tce_converted": 776,
+    "Provincial_coal_share_logit_polynomial_fit": 240,
+    "Provincial_coal_share_logit_interpolation": 4
   },
   "industry_source_counts": {
     "Provincial_industry_share_1996_2024_observed": 809,
@@ -37,11 +45,21 @@
     "Provincial_urbanization_share_1990_2025_observed": 555,
     "Provincial_urbanization_logit_polynomial_fit": 465
   },
+  "highway_mileage_source_counts": {
+    "Provincial_railway_mileage_1990_2024_used_as_highway_proxy": 1014,
+    "Provincial_highway_mileage_log_polynomial_fit": 6
+  },
+  "private_cars_source_counts": {
+    "Provincial_civil_car_1990_2024_used_as_private_cars_proxy": 1015,
+    "Provincial_private_cars_log_polynomial_fit": 5
+  },
   "notes": [
     "CO2 uses MEIC provincial total emissions only (1990-2023).",
+    "Energy is aggregated after converting fuel-specific total final consumption into standard coal equivalent (tce).",
+    "CoalShare is defined as coal-group tce divided by total final consumption tce.",
     "All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
     "No national fallback is used in this build.",
-    "LMDI decomposition is temporarily disabled.",
+    "HighwayMileage and PrivateCars are integrated from provincial transport dataset.",
     "Panel rows are always output in stable province-year order."
   ]
 }

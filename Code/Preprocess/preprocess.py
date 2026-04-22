@@ -11,10 +11,11 @@ import pandas as pd
 from openpyxl import load_workbook
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PREPROCESS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = PREPROCESS_DIR.parents[1]
 DATASET_ROOT = PROJECT_ROOT / "Dataset"
-SUMMARY_JSON = PROJECT_ROOT / "Code" / "dataset_index_summary.json"
-OUT_DIR = PROJECT_ROOT / "Code" / "output"
+SUMMARY_JSON = PREPROCESS_DIR / "dataset_index_summary.json"
+OUT_DIR = PREPROCESS_DIR / "output"
 
 
 # Conversion factors to standard coal equivalent (10^4 tce per original unit in inventory row).
@@ -159,7 +160,12 @@ def load_dataset_index() -> List[dict]:
 	"""读取数据索引文件并返回条目列表。"""
 
 	payload = json.loads(SUMMARY_JSON.read_text(encoding="utf-8"))
-	return payload["items"]
+	items = payload["items"]
+	for item in items:
+		path = str(item.get("path", ""))
+		if path and not Path(path).is_absolute():
+			item["path"] = str(PROJECT_ROOT / path)
+	return items
 
 
 def ensure_output_dir() -> None:
@@ -688,8 +694,6 @@ def select_single_sheet_path_by_keywords(items: List[dict], keywords: Iterable[s
 		if all(k in path for k in keywords):
 			return path
 	return None
-
-
 
 
 def read_provincial_industry_share(items: List[dict]) -> pd.DataFrame:

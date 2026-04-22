@@ -49,9 +49,11 @@ PROVINCE_ALIAS = {
 	"qinghai": "Qinghai",
 	"ningxia": "Ningxia",
 	"xinjiang": "Xinjiang",
+	"xizang": "Tibet",
 	# Common variants
 	"innermongoliaautonomousregion": "InnerMongolia",
 	"innermongoliaregion": "InnerMongolia",
+	"tibet": "Tibet",
 }
 
 ZH_PROVINCE_ALIAS = {
@@ -115,6 +117,8 @@ ZH_PROVINCE_ALIAS = {
 	"宁夏回族自治区": "Ningxia",
 	"新疆": "Xinjiang",
 	"新疆维吾尔自治区": "Xinjiang",
+	"西藏": "Tibet",
+	"西藏自治区": "Tibet",
 }
 
 
@@ -327,14 +331,14 @@ def read_meic_co2(items: List[dict]) -> pd.DataFrame:
 		value_name="CO2",
 	)
 	long_df["year"] = long_df["year"].astype(int)
-	long_df = long_df[(long_df["year"] >= 1990) & (long_df["year"] <= 2000)]
+	long_df = long_df[(long_df["year"] >= 1990) & (long_df["year"] <= 2022)]
 	long_df["province"] = long_df["province_raw"].map(normalize_province_name)
 	long_df["CO2"] = pd.to_numeric(long_df["CO2"], errors="coerce")
 	long_df = long_df.dropna(subset=["province", "CO2"])
 
 	out = long_df[["province", "year", "CO2"]].copy()
-	out["CO2_source"] = "MEIC_1990_2000"
-	out["CO2_source_priority"] = 2
+	out["CO2_source"] = "MEIC_1990_2022"
+	out["CO2_source_priority"] = 1
 	return out
 
 
@@ -362,17 +366,13 @@ def align_meic_to_nbs_scale(nbs: pd.DataFrame, meic: pd.DataFrame) -> pd.DataFra
 
 
 def build_co2_panel(items: List[dict]) -> pd.DataFrame:
-	nbs = read_inventory_co2_nbs(items)
-	meic = align_meic_to_nbs_scale(nbs, read_meic_co2(items))
-	combo = pd.concat([nbs, meic], ignore_index=True)
-
-	combo = combo.sort_values(["province", "year", "CO2_source_priority"]).drop_duplicates(
+	meic = read_meic_co2(items)
+	meic = meic[(meic["year"] >= 1990) & (meic["year"] <= 2022)].copy()
+	meic = meic.sort_values(["province", "year", "CO2_source_priority"]).drop_duplicates(
 		subset=["province", "year"],
 		keep="first",
 	)
-	combo = combo[(combo["year"] >= 1990) & (combo["year"] <= 2022)].copy()
-
-	return combo.sort_values(["province", "year"]).reset_index(drop=True)
+	return meic.sort_values(["province", "year"]).reset_index(drop=True)
 
 
 def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
@@ -525,6 +525,9 @@ def build_national_controls(items: List[dict]) -> List[VariableSeries]:
 		gdp_path = select_single_sheet_path(items, "GDP")
 
 	series_list: List[VariableSeries] = []
+	population_series: Optional[VariableSeries] = None
+	urban_population_series: Optional[VariableSeries] = None
+	urbanization_series: Optional[VariableSeries] = None
 	if gdp_path:
 		series_list.append(
 			read_national_series(
@@ -543,6 +546,7 @@ def build_national_controls(items: List[dict]) -> List[VariableSeries]:
 				indicator_keywords=["年末总人口"],
 			)
 		)
+		population_series = series_list[-1]
 		# Prefer computing urbanization from population components when available.
 		series_list.append(
 			read_national_series(
@@ -552,6 +556,7 @@ def build_national_controls(items: List[dict]) -> List[VariableSeries]:
 				indicator_keywords=["城镇人口"],
 			)
 		)
+		urban_population_series = series_list[-1]
 	if energy_path:
 		series_list.append(
 			read_national_series(
@@ -571,14 +576,34 @@ def build_national_controls(items: List[dict]) -> List[VariableSeries]:
 			)
 		)
 	if urban_path:
-		series_list.append(
-			read_national_series(
-				urban_path,
-				variable_name="Urbanization",
-				source_name="National_macro_Urbanization",
-				indicator_keywords=["城镇化率", "城镇"],
-			)
+		urbanization_series = read_national_series(
+			urban_path,
+			variable_name="Urbanization",
+			source_name="National_macro_Urbanization",
+			indicator_keywords=["城镇化率", "城镇"],
 		)
+		if not urbanization_series.data.empty:
+			series_list.append(urbanization_series)
+
+	if (urbanization_series is None or urbanization_series.data.empty) and population_series is not None and urban_population_series is not None:
+		fallback_df = population_series.data.merge(
+			urban_population_series.data,
+			on="year",
+			how="inner",
+			suffixes=("_Population", "_UrbanPopulation"),
+		)
+		if not fallback_df.empty and "Population" in fallback_df.columns and "UrbanPopulation" in fallback_df.columns:
+			fallback_df["Urbanization"] = (pd.to_numeric(fallback_df["UrbanPopulation"], errors="coerce") / pd.to_numeric(fallback_df["Population"], errors="coerce")) * 100.0
+			fallback_df = cast(pd.DataFrame, fallback_df.loc[:, ["year", "Urbanization"]].copy())
+			fallback_df = cast(pd.DataFrame, fallback_df.dropna(subset=["Urbanization"]))
+			if not fallback_df.empty:
+				series_list.append(
+					VariableSeries(
+						name="Urbanization",
+						source="National_macro_Urbanization_derived_from_UrbanPopulation_over_Population",
+						data=fallback_df.sort_values("year").reset_index(drop=True),
+					)
+				)
 
 	return series_list
 
@@ -925,39 +950,43 @@ def fill_urbanization_with_interpolation_fit_and_anchor(
 		},
 	)
 	df["Urbanization_source"] = df["Urbanization_source"].astype(object)
+	df["Urbanization_national_ref"] = pd.to_numeric(df["Urbanization"], errors="coerce") if "Urbanization" in df.columns else np.nan
 
 	if "Urbanization_prov" in df.columns:
 		obs_mask = df["Urbanization_prov"].notna()
 		df.loc[obs_mask, "Urbanization"] = pd.to_numeric(df.loc[obs_mask, "Urbanization_prov"], errors="coerce")
-		df.loc[obs_mask, "Urbanization_source"] = "Provincial_urbanization_share_1990_2025_observed"
+		df.loc[obs_mask, "Urbanization_source"] = "Provincial_urbanization_share_observed"
 		df.loc[obs_mask, "Urbanization_is_national_proxy"] = 0
 		df.loc[obs_mask, "Urbanization_is_imputed"] = 0
-		df = df.drop(columns=["Urbanization_prov"], errors="ignore")
 
-	df = transformed_interpolate_extrapolate_by_province(
-		df,
-		value_col="Urbanization",
-		source_col="Urbanization_source",
-		proxy_flag_col="Urbanization_is_national_proxy",
-		imputed_col="Urbanization_is_imputed",
-		mode="logit",
-		inside_source="Provincial_urbanization_logit_interpolation",
-		fit_source="Provincial_urbanization_logit_linear_fit_extrapolation",
-		backcast_source="Provincial_urbanization_logit_backcast_extrapolation",
-	)
+	for province, idx in df.groupby("province").groups.items():
+		province_idx = list(idx)
+		province_mask = df.index.isin(province_idx)
+		ref_mask = province_mask & df["Urbanization_national_ref"].notna()
+		obs_proxy_mask = province_mask & df["Urbanization"].notna() & df["Urbanization_national_ref"].notna()
+		alpha = np.nan
+		if obs_proxy_mask.any():
+			ratio = pd.to_numeric(df.loc[obs_proxy_mask, "Urbanization"], errors="coerce") / pd.to_numeric(df.loc[obs_proxy_mask, "Urbanization_national_ref"], errors="coerce")
+			ratio = ratio.replace([np.inf, -np.inf], np.nan).dropna()
+			if not ratio.empty:
+				alpha = float(ratio.mean())
+		if not np.isfinite(alpha) or alpha <= 0:
+			alpha = 1.0
+		fill_mask = province_mask & df["Urbanization_prov"].isna() if "Urbanization_prov" in df.columns else province_mask
+		fill_mask = fill_mask & df["Urbanization_national_ref"].notna()
+		if fill_mask.any():
+			df.loc[fill_mask, "Urbanization"] = pd.to_numeric(df.loc[fill_mask, "Urbanization_national_ref"], errors="coerce") * alpha
+			df.loc[fill_mask, "Urbanization_source"] = "National_urbanization_scaled_by_prov_ratio"
+			df.loc[fill_mask, "Urbanization_is_national_proxy"] = 1
+			df.loc[fill_mask, "Urbanization_is_imputed"] = 1
+		if obs_proxy_mask.any():
+			df.loc[obs_proxy_mask, "Urbanization_source"] = "Provincial_urbanization_share_observed"
+			df.loc[obs_proxy_mask, "Urbanization_is_national_proxy"] = 0
+			df.loc[obs_proxy_mask, "Urbanization_is_imputed"] = 0
+	df = df.drop(columns=["Urbanization_prov"], errors="ignore")
+	df = df.drop(columns=["Urbanization_national_ref"], errors="ignore")
 
-	if urbanization_proxy_series is not None and not urbanization_proxy_series.data.empty:
-		proxy = urbanization_proxy_series.data.rename(columns={"Urbanization": "Urbanization_national_ref"})
-		df = df.merge(proxy, on="year", how="left")
-		df = apply_national_anchor_shift(
-			df,
-			value_col="Urbanization",
-			source_col="Urbanization_source",
-			proxy_flag_col="Urbanization_is_national_proxy",
-			imputed_col="Urbanization_is_imputed",
-			national_col="Urbanization_national_ref",
-			fallback_source=urbanization_proxy_series.source,
-		)
+	df["Urbanization"] = pd.to_numeric(df["Urbanization"], errors="coerce").clip(lower=0.01, upper=99.99)
 
 	return df
 
@@ -969,13 +998,15 @@ def safe_log(s: pd.Series) -> pd.Series:
 
 def add_kaya_features(panel: pd.DataFrame) -> pd.DataFrame:
 	df = panel.copy()
+	df["S"] = pd.to_numeric(df["Industry"], errors="coerce") / 100.0
 	df["A"] = df["GDP"] / df["Population"]
-	df["B"] = df["Energy"] / df["GDP"]
+	df["B"] = df["Energy"] / (df["GDP"] * df["S"])
 	df["C"] = df["CO2"] / df["Energy"]
 
 	df["ln_CO2"] = safe_log(df["CO2"])
 	df["ln_Population"] = safe_log(df["Population"])
 	df["ln_A"] = safe_log(df["A"])
+	df["ln_S"] = safe_log(df["S"])
 	df["ln_B"] = safe_log(df["B"])
 	df["ln_C"] = safe_log(df["C"])
 	return df
@@ -1007,12 +1038,13 @@ def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
 			e0, et = prev["CO2"], curr["CO2"]
 			p0, pt = prev["Population"], curr["Population"]
 			a0, at = prev["A"], curr["A"]
+			s0, st = prev["S"], curr["S"]
 			b0, bt = prev["B"], curr["B"]
 			c0, ct = prev["C"], curr["C"]
 
 			valid = all(
 				pd.notna(v) and float(v) > 0
-				for v in [e0, et, p0, pt, a0, at, b0, bt, c0, ct]
+				for v in [e0, et, p0, pt, a0, at, s0, st, b0, bt, c0, ct]
 			)
 			if not valid:
 				continue
@@ -1023,10 +1055,11 @@ def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
 
 			d_p = lm * np.log(float(pt) / float(p0))
 			d_a = lm * np.log(float(at) / float(a0))
+			d_s = lm * np.log(float(st) / float(s0))
 			d_b = lm * np.log(float(bt) / float(b0))
 			d_c = lm * np.log(float(ct) / float(c0))
 			d_co2 = float(et) - float(e0)
-			resid = d_co2 - (d_p + d_a + d_b + d_c)
+			resid = d_co2 - (d_p + d_a + d_s + d_b + d_c)
 			resid_ratio_abs = abs(resid) / max(abs(d_co2), 1e-12)
 
 			rows.append(
@@ -1037,6 +1070,7 @@ def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
 					"delta_CO2": d_co2,
 					"delta_P": d_p,
 					"delta_A": d_a,
+					"delta_S": d_s,
 					"delta_B": d_b,
 					"delta_C": d_c,
 					"lmdi_residual": resid,
@@ -1074,18 +1108,85 @@ def attach_controls(panel: pd.DataFrame, controls: List[VariableSeries]) -> pd.D
 	return df
 
 
-def fill_energy_with_interpolation_and_fit(panel: pd.DataFrame) -> pd.DataFrame:
-	return transformed_interpolate_extrapolate_by_province(
-		panel,
-		value_col="Energy",
-		source_col="Energy_source",
-		proxy_flag_col="Energy_is_national_proxy",
-		imputed_col="Energy_is_imputed",
-		mode="log",
-		inside_source="Provincial_energy_log_interpolation",
-		fit_source="Provincial_energy_log_linear_fit_extrapolation",
-		backcast_source="Provincial_energy_cagr_backcast_extrapolation",
+def fill_energy_with_interpolation_and_fit(
+	panel: pd.DataFrame,
+	national_energy_series: Optional[VariableSeries],
+) -> pd.DataFrame:
+	df = ensure_cols(
+		panel.copy(),
+		{
+			"Energy": np.nan,
+			"Energy_source": np.nan,
+			"Energy_is_national_proxy": 0,
+			"Energy_is_imputed": 0,
+			"Energy_scale_factor": np.nan,
+		},
 	)
+
+	if national_energy_series is None or national_energy_series.data.empty:
+		return df
+
+	national = national_energy_series.data.rename(columns={"Energy": "Energy_national"})
+	df = df.merge(national, on="year", how="left")
+
+	for year, idx in df.groupby("year").groups.items():
+		year_int = int(cast(Any, year))
+		year_idx = list(idx)
+		year_mask = df.index.isin(year_idx)
+		nat_vals = df.loc[year_idx, "Energy_national"].dropna()
+		if nat_vals.empty:
+			continue
+		national_total = float(nat_vals.iloc[0])
+		observed_mask = year_mask & df["Energy"].notna()
+		missing_mask = year_mask & df["Energy"].isna()
+
+		if year_int < 1997 or not observed_mask.any():
+			weights = pd.to_numeric(df.loc[year_mask, "GDP"], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+			weight_sum = float(weights.sum())
+			if weight_sum > 0:
+				alloc_values = (weights.astype(float) / weight_sum).to_numpy(dtype=float) * national_total
+				df.loc[year_mask, "Energy"] = alloc_values
+				df.loc[year_mask, "Energy_source"] = "National_energy_allocated_by_GDP_share_pre1997"
+			else:
+				count_missing = int(year_mask.sum())
+				if count_missing > 0:
+					df.loc[year_mask, "Energy"] = national_total / count_missing
+					df.loc[year_mask, "Energy_source"] = "National_energy_equal_split_fallback_pre1997"
+			df.loc[year_mask, "Energy_is_national_proxy"] = 1
+			df.loc[year_mask, "Energy_is_imputed"] = 1
+			df.loc[year_mask, "Energy_scale_factor"] = 1.0
+			continue
+
+		if missing_mask.any():
+			weights = pd.to_numeric(df.loc[missing_mask, "GDP"], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
+			weight_sum = float(weights.sum())
+			observed_sum = float(df.loc[observed_mask, "Energy"].sum(skipna=True))
+			residual = national_total - observed_sum
+			if weight_sum > 0:
+				alloc = max(residual, 0.0) * (weights / weight_sum)
+				df.loc[missing_mask, "Energy"] = alloc.values
+				df.loc[missing_mask, "Energy_source"] = "National_energy_allocated_by_GDP_share_residual"
+			else:
+				count_missing = int(missing_mask.sum())
+				if count_missing > 0:
+					df.loc[missing_mask, "Energy"] = max(residual, 0.0) / count_missing
+					df.loc[missing_mask, "Energy_source"] = "National_energy_equal_split_fallback"
+			df.loc[missing_mask, "Energy_is_national_proxy"] = 1
+			df.loc[missing_mask, "Energy_is_imputed"] = 1
+
+		year_total = float(pd.to_numeric(df.loc[year_mask, "Energy"], errors="coerce").sum(skipna=True))
+		if np.isfinite(year_total) and year_total > 0 and np.isfinite(national_total) and national_total > 0:
+			scale = national_total / year_total
+			if not np.isfinite(scale) or scale <= 0:
+				scale = 1.0
+			scaled_energy = pd.to_numeric(df.loc[year_mask, "Energy"], errors="coerce").to_numpy(dtype=float) * scale
+			df.loc[year_mask, "Energy"] = scaled_energy
+			df.loc[year_mask, "Energy_scale_factor"] = scale
+
+	df["Energy"] = pd.to_numeric(df["Energy"], errors="coerce")
+	df["Energy_is_national_proxy"] = pd.to_numeric(df["Energy_is_national_proxy"], errors="coerce").fillna(0)
+	df["Energy_is_imputed"] = pd.to_numeric(df["Energy_is_imputed"], errors="coerce").fillna(0)
+	return df
 
 
 def allocate_missing_energy_from_national_proxy(panel: pd.DataFrame, source_name: str) -> pd.DataFrame:
@@ -1240,7 +1341,7 @@ def main() -> None:
 	energy_proxy_series = next((s for s in controls if s.name == "Energy"), None)
 	industry_proxy_series = next((s for s in controls if s.name == "Industry"), None)
 	urbanization_proxy_series = next((s for s in controls if s.name == "Urbanization"), None)
-	non_energy_controls = [s for s in controls if s.name not in {"Energy", "Industry", "Urbanization", "UrbanPopulation"}]
+	non_energy_controls = [s for s in controls if s.name not in {"Energy", "Industry", "UrbanPopulation"}]
 
 	panel = attach_controls(co2_panel, non_energy_controls)
 	panel = merge_provincial_variable(panel, prov_gdp)
@@ -1282,13 +1383,7 @@ def main() -> None:
 	if "Energy_is_imputed" not in panel.columns:
 		panel["Energy_is_imputed"] = 0
 
-	panel = fill_energy_with_interpolation_and_fit(panel)
-
-	if energy_proxy_series is not None and not energy_proxy_series.data.empty:
-		energy_proxy_df = energy_proxy_series.data.rename(columns={"Energy": "Energy_proxy"})
-		panel = panel.merge(energy_proxy_df, on="year", how="left")
-		panel = allocate_missing_energy_from_national_proxy(panel, energy_proxy_series.source)
-		panel = panel.drop(columns=["Energy_proxy"], errors="ignore")
+	panel = fill_energy_with_interpolation_and_fit(panel, energy_proxy_series)
 
 	panel["Energy_is_national_proxy"] = panel["Energy_is_national_proxy"].fillna(0)
 	panel["Energy_is_imputed"] = panel["Energy_is_imputed"].fillna(0)
@@ -1302,6 +1397,7 @@ def main() -> None:
 		"Population",
 		"Energy",
 		"Industry",
+		"S",
 		"Urbanization",
 		"A",
 		"B",
@@ -1349,8 +1445,8 @@ def main() -> None:
 		"year_min": int(panel_core["year"].min()) if len(panel_core) else None,
 		"year_max": int(panel_core["year"].max()) if len(panel_core) else None,
 		"co2_source_counts": panel_core["CO2_source"].value_counts(dropna=False).to_dict(),
-			"gdp_source_counts": panel["GDP_source"].value_counts(dropna=False).to_dict() if "GDP_source" in panel.columns else {},
-			"population_source_counts": panel["Population_source"].value_counts(dropna=False).to_dict() if "Population_source" in panel.columns else {},
+		"gdp_source_counts": panel["GDP_source"].value_counts(dropna=False).to_dict() if "GDP_source" in panel.columns else {},
+		"population_source_counts": panel["Population_source"].value_counts(dropna=False).to_dict() if "Population_source" in panel.columns else {},
 		"unit_diagnostics": unit_diagnostics,
 		"unit_consistency_warnings": unit_warnings,
 		"lmdi_residual_abs_ratio_stats": lmdi_residual_ratio_stats,
@@ -1369,12 +1465,12 @@ def main() -> None:
 		if "Urbanization_source" in panel.columns
 		else {},
 		"notes": [
-			"CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000), and MEIC is scale-aligned to NBS via 1998-2000 vs 2001-2003 anchors.",
+			"CO2 uses MEIC 1990-2022 only; no NBS splice is used.",
 			"GDP and Population use provincial observed series when available, with national macro series retained only as fallback.",
-			"Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
-			"If energy is still missing after imputation, national proxy is allocated to missing provinces by GDP x (1 + Industry share) weight, instead of direct national total assignment.",
+			"Industry is included as a structural effect in the Kaya identity; B is defined as energy intensity after structural adjustment so the five-factor identity remains exact.",
+			"Energy uses provincial inventory (1997-2022) plus national-energy constraint: 1990-1996 are GDP-weighted allocations, and each year is rescaled to the national total.",
 			"Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and additive national anchor shift for imputed years.",
-			"Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast, optional quadratic extrapolation when data support it, and additive national anchor shift for imputed years.",
+			"Urbanization uses provincial observed series when available and fills missing years by province-specific ratio to the national urbanization series.",
 			"LMDI residual diagnostics are reported in resid_ratio, lmdi_residual_abs_ratio, and summary stats.",
 		],
 	}

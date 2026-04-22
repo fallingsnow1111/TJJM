@@ -1,32 +1,31 @@
 {
-  "panel_rows": 990,
-  "province_count": 30,
+  "panel_rows": 1023,
+  "province_count": 31,
   "year_min": 1990,
   "year_max": 2022,
   "co2_source_counts": {
-    "NBS_2001_2022_inventory": 660,
-    "MEIC_1990_2000_scaled_to_NBS_anchor_global": 330
+    "MEIC_1990_2022": 1023
   },
   "gdp_source_counts": {
-    "Provincial_macro_GDP_1949_2024_observed": 990
+    "Provincial_macro_GDP_1949_2024_observed": 1023
   },
   "population_source_counts": {
-    "Provincial_macro_Population_1949_2024_observed": 989,
+    "Provincial_macro_Population_1949_2024_observed": 1022,
     "National_macro_Population": 1
   },
   "unit_diagnostics": {
-    "CO2_mean": 217.39887986558463,
-    "GDP_mean": 13131.587439050507,
-    "Energy_mean": 18730.14194992931,
-    "Energy_over_GDP_mean_ratio": 1.4263425527845865,
-    "CO2_over_Energy_mean_ratio": 0.011606899747303043
+    "CO2_mean": 199.04031573802544,
+    "GDP_mean": 12727.007402932551,
+    "Energy_mean": 9278.313782991203,
+    "Energy_over_GDP_mean_ratio": 0.7290255665957496,
+    "CO2_over_Energy_mean_ratio": 0.02145220784652721
   },
   "unit_consistency_warnings": [],
   "lmdi_residual_abs_ratio_stats": {
-    "mean": 1.5131498657123917e-14,
-    "median": 4.495623682322066e-15,
-    "p90": 2.372640118710191e-14,
-    "max": 2.3290086550102794e-12
+    "mean": 1.8896293998912393e-14,
+    "median": 4.604401938411909e-15,
+    "p90": 3.2367344764790585e-14,
+    "max": 3.6020569243392603e-12
   },
   "missing_ratio": {
     "CO2": 0.0,
@@ -40,25 +39,24 @@
     "C": 0.0
   },
   "energy_source_counts": {
-    "Provincial_energy_inventory_1997_2022_total_final_consumption_sum": 776,
-    "Provincial_energy_log_linear_fit_extrapolation_quadratic": 210,
-    "Provincial_energy_log_interpolation": 4
+    "Provincial_energy_inventory_1997_2022_total_final_consumption_sum": 780,
+    "National_energy_allocated_by_GDP_share_pre1997": 217,
+    "National_energy_allocated_by_GDP_share_residual": 26
   },
   "industry_source_counts": {
-    "Provincial_industry_share_1996_2024_observed": 809,
-    "Provincial_industry_logit_linear_fit_extrapolation_quadratic_national_anchor_shift": 181
+    "Provincial_industry_share_1996_2024_observed": 836,
+    "Provincial_industry_logit_linear_fit_extrapolation_quadratic_national_anchor_shift": 187
   },
   "urbanization_source_counts": {
-    "Provincial_urbanization_share_1990_2025_observed": 555,
-    "Provincial_urbanization_logit_linear_fit_extrapolation_quadratic": 435
+    "Provincial_urbanization_share_observed": 1023
   },
   "notes": [
-    "CO2 source priority applied: NBS(2001-2022) > MEIC(1990-2000), and MEIC is scale-aligned to NBS via 1998-2000 vs 2001-2003 anchors.",
+    "CO2 uses MEIC 1990-2022 only; no NBS splice is used.",
     "GDP and Population use provincial observed series when available, with national macro series retained only as fallback.",
-    "Energy uses provincial inventory (1997-2022); internal gaps are log-interpolated and leading gaps are backcast by province log-linear fit.",
-    "If energy is still missing after imputation, national proxy is allocated to missing provinces by GDP x (1 + Industry share) weight, instead of direct national total assignment.",
+    "Industry is included as a structural effect in the Kaya identity; B is defined as energy intensity after structural adjustment so the five-factor identity remains exact.",
+    "Energy uses provincial inventory (1997-2022) plus national-energy constraint: 1990-1996 are GDP-weighted allocations, and each year is rescaled to the national total.",
     "Industry uses provincial share series (observed mostly from 1996 onward), with logit interpolation/backcast and additive national anchor shift for imputed years.",
-    "Urbanization uses provincial share series (mostly observed from 2005 onward, Anhui earlier), with logit interpolation/backcast, optional quadratic extrapolation when data support it, and additive national anchor shift for imputed years.",
+    "Urbanization uses provincial observed series when available and fills missing years by province-specific ratio to the national urbanization series.",
     "LMDI residual diagnostics are reported in resid_ratio, lmdi_residual_abs_ratio, and summary stats."
   ]
 }

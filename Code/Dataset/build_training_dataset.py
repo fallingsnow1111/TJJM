@@ -231,7 +231,7 @@ def parse_args() -> BuildConfig:
 	parser.add_argument("--output-npz", type=Path, default=default_out_dir / "stirpat_ee_gru_dataset.npz")
 	parser.add_argument("--output-panel-csv", type=Path, default=default_out_dir / "panel_with_residual.csv")
 	parser.add_argument("--output-meta-json", type=Path, default=default_out_dir / "dataset_meta.json")
-	parser.add_argument("--window", type=int, default=5)
+	parser.add_argument("--window", type=int, default=3)
 	parser.add_argument("--train-end-year", type=int, default=2020)
 	parser.add_argument("--valid-start-year", type=int, default=2021)
 	parser.add_argument("--valid-end-year", type=int, default=2023)

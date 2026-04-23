@@ -38,7 +38,7 @@ class TrainConfig:
 	dropout: float = 0.2
 	patience: int = 15
 	max_grad_norm: float = 1.0
-	seed: int = 101
+	seed: int = 42
 
 
 class ResidualDataset(Dataset):

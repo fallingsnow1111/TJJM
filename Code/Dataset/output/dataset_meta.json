@@ -4,7 +4,7 @@
     "output_npz": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Dataset\\output\\stirpat_ee_gru_dataset.npz",
     "output_panel_csv": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Dataset\\output\\panel_with_residual.csv",
     "output_meta_json": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Dataset\\output\\dataset_meta.json",
-    "window": 5,
+    "window": 3,
     "train_end_year": 2020,
     "valid_start_year": 2021,
     "valid_end_year": 2023,

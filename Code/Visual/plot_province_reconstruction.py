@@ -21,7 +21,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Visualize original vs hybrid-predicted CO2 by recursive model inference."
     )
-    parser.add_argument("--province", default="Guangdong", help="Province name in panel CSV")
+    parser.add_argument(
+        "--province",
+        default="ALL",
+        help="Province name in panel CSV; use ALL to generate plots for all provinces",
+    )
     parser.add_argument("--start-year", type=int, default=1990, help="Start year")
     parser.add_argument("--end-year", type=int, default=2023, help="End year")
     parser.add_argument(
@@ -75,6 +79,143 @@ def load_model(model_ckpt: Path, device: torch.device) -> EntityEmbeddingGRU:
     return model
 
 
+def infer_province_hybrid(
+    province_df: pd.DataFrame,
+    gru_feature_names: list[str],
+    mean: np.ndarray,
+    std: np.ndarray,
+    window: int,
+    model: EntityEmbeddingGRU,
+    device: torch.device,
+) -> pd.DataFrame:
+    province_df = province_df.sort_values("year", kind="stable").reset_index(drop=True)
+    province_df["year"] = province_df["year"].astype(int)
+    province_df["true_co2"] = province_df["CO2"].astype(float)
+    province_df["stirpat_co2"] = province_df["stirpat_log_pred"].astype(float).map(lambda x: float(np.exp(x)))
+
+    dynamic_raw = province_df[gru_feature_names].to_numpy(dtype=np.float32)
+    dynamic_std = (dynamic_raw - mean) / std
+    stirpat_log_arr = province_df["stirpat_log_pred"].to_numpy(dtype=np.float32)
+
+    province_ids = province_df["province_id"].astype(int).unique().tolist()
+    if len(province_ids) != 1:
+        raise ValueError(f"Province has inconsistent province_id values: {province_ids}")
+    province_idx = int(province_ids[0])
+
+    pred_residual = np.zeros(len(province_df), dtype=np.float32)
+    pred_log_co2 = np.zeros(len(province_df), dtype=np.float32)
+
+    with torch.no_grad():
+        for i in range(len(province_df)):
+            dyn_seq = np.zeros((window, len(gru_feature_names)), dtype=np.float32)
+            lag_seq = np.zeros((window, 1), dtype=np.float32)
+
+            for j in range(window):
+                src_idx = i - window + j
+                if src_idx < 0:
+                    dyn_seq[j] = dynamic_std[0]
+                    lag_seq[j, 0] = 0.0
+                else:
+                    dyn_seq[j] = dynamic_std[src_idx]
+                    lag_seq[j, 0] = pred_residual[src_idx]
+
+            x_dyn = torch.tensor(dyn_seq[None, :, :], dtype=torch.float32, device=device)
+            x_lag = torch.tensor(lag_seq[None, :, :], dtype=torch.float32, device=device)
+            x_pid = torch.tensor([province_idx], dtype=torch.long, device=device)
+
+            res_hat = float(model(x_dyn, x_lag, x_pid).cpu().item())
+            pred_residual[i] = res_hat
+            stirpat_log_i = float(stirpat_log_arr[i])
+            pred_log_co2[i] = stirpat_log_i + res_hat
+
+    province_df["pred_residual"] = pred_residual
+    province_df["pred_log_co2"] = pred_log_co2
+    province_df["pred_co2"] = province_df["pred_log_co2"].map(lambda x: float(np.exp(x)))
+    return province_df
+
+
+def plot_and_save(
+    province_df: pd.DataFrame,
+    province: str,
+    start_year: int,
+    end_year: int,
+    window: int,
+    output_dir: Path,
+) -> tuple[float, float, int, Path, Path]:
+    mae = (province_df["true_co2"] - province_df["pred_co2"]).abs().mean()
+    mape = ((province_df["true_co2"] - province_df["pred_co2"]).abs() / province_df["true_co2"]).mean() * 100
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(
+        province_df["year"],
+        province_df["true_co2"],
+        color="#1f77b4",
+        linewidth=2.2,
+        marker="o",
+        markersize=4,
+        label="Original CO2",
+    )
+    ax.plot(
+        province_df["year"],
+        province_df["stirpat_co2"],
+        color="#6c757d",
+        linewidth=1.8,
+        linestyle=":",
+        label="STIRPAT Baseline",
+    )
+    ax.plot(
+        province_df["year"],
+        province_df["pred_co2"],
+        color="#d62728",
+        linewidth=2.2,
+        marker="s",
+        markersize=4,
+        linestyle="--",
+        label="Predicted CO2 (Hybrid, Recursive Inference)",
+    )
+
+    ax.set_title(
+        f"{province} CO2: Original vs Predicted ({start_year}-{end_year})",
+        fontsize=13,
+    )
+    ax.set_xlabel("Year")
+    ax.set_ylabel("CO2")
+    ax.grid(True, alpha=0.25, linestyle="--")
+    ax.legend(loc="lower right")
+
+    metric_text = f"MAE={mae:.3f}    MAPE={mape:.2f}%    window={window}"
+    ax.text(
+        0.04,
+        0.95,
+        metric_text,
+        transform=ax.transAxes,
+        va="top",
+        ha="left",
+        fontsize=10,
+        bbox=dict(facecolor="white", alpha=0.8, edgecolor="#bbbbbb"),
+    )
+
+    figure_path = output_dir / f"{province}_{start_year}_{end_year}_original_vs_pred.png"
+    data_path = output_dir / f"{province}_{start_year}_{end_year}_original_vs_pred.csv"
+
+    fig.tight_layout()
+    fig.savefig(str(figure_path), dpi=300)
+    plt.close(fig)
+
+    province_df[
+        [
+            "province",
+            "year",
+            "true_co2",
+            "stirpat_co2",
+            "pred_residual",
+            "pred_log_co2",
+            "pred_co2",
+        ]
+    ].to_csv(data_path, index=False)
+    return float(mae), float(mape), int(len(province_df)), figure_path, data_path
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
@@ -118,128 +259,65 @@ def main() -> None:
     if feat_missing:
         raise ValueError(f"Missing GRU feature columns in input CSV: {feat_missing}")
 
-    province_df = df.loc[
-        (df["province"] == args.province)
-        & (df["year"].between(args.start_year, args.end_year))
-    ].copy()
+    # Standardization stats are fitted on train years in dataset builder and stored in NPZ.
+    # Here we reuse those saved stats directly for inference.
+    province_names = sorted(df["province"].astype(str).unique().tolist())
+    if args.province.upper() == "ALL":
+        target_provinces = province_names
+    else:
+        if args.province not in province_names:
+            raise ValueError(f"Province not found in input CSV: {args.province}")
+        target_provinces = [args.province]
 
-    if province_df.empty:
-        raise ValueError(
-            f"No rows found for province={args.province}, years={args.start_year}-{args.end_year}."
+    summary_rows: list[dict[str, float | int | str]] = []
+    for province in target_provinces:
+        province_df = df.loc[
+            (df["province"] == province) & (df["year"].between(args.start_year, args.end_year))
+        ].copy()
+
+        if province_df.empty:
+            continue
+
+        pred_df = infer_province_hybrid(
+            province_df=province_df,
+            gru_feature_names=gru_feature_names,
+            mean=mean,
+            std=std,
+            window=window,
+            model=model,
+            device=device,
         )
+        mae, mape, n_rows, figure_path, data_path = plot_and_save(
+            province_df=pred_df,
+            province=province,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            window=window,
+            output_dir=output_dir,
+        )
+        summary_rows.append(
+            {
+                "province": province,
+                "rows": n_rows,
+                "mae": mae,
+                "mape_pct": mape,
+                "figure_path": str(figure_path),
+                "data_path": str(data_path),
+            }
+        )
+        print(f"Saved figure: {figure_path}")
+        print(f"Saved data:   {data_path}")
+        print(f"[{province}] Rows={n_rows}; MAE={mae:.3f}; MAPE={mape:.2f}%")
 
-    province_df = province_df.sort_values("year", kind="stable").reset_index(drop=True)
-    province_df["year"] = province_df["year"].astype(int)
-    province_df["true_co2"] = province_df["CO2"].astype(float)
-    province_df["stirpat_co2"] = province_df["stirpat_log_pred"].astype(float).map(lambda x: float(np.exp(x)))
+    if not summary_rows:
+        raise RuntimeError("No province data generated for the specified filters.")
 
-    dynamic_raw = province_df[gru_feature_names].to_numpy(dtype=np.float32)
-    dynamic_std = (dynamic_raw - mean) / std
-    province_idx = int(province_df["province_id"].iloc[0])
+    summary_df = pd.DataFrame(summary_rows).sort_values("province", kind="stable")
+    summary_path = output_dir / f"summary_{args.start_year}_{args.end_year}.csv"
+    summary_df.to_csv(summary_path, index=False)
 
-    pred_residual = np.zeros(len(province_df), dtype=np.float32)
-    pred_log_co2 = np.zeros(len(province_df), dtype=np.float32)
-
-    with torch.no_grad():
-        for i in range(len(province_df)):
-            dyn_seq = np.zeros((window, len(gru_feature_names)), dtype=np.float32)
-            lag_seq = np.zeros((window, 1), dtype=np.float32)
-
-            for j in range(window):
-                src_idx = i - window + j
-                if src_idx < 0:
-                    dyn_seq[j] = dynamic_std[0]
-                    lag_seq[j, 0] = 0.0
-                else:
-                    dyn_seq[j] = dynamic_std[src_idx]
-                    lag_seq[j, 0] = pred_residual[src_idx]
-
-            x_dyn = torch.tensor(dyn_seq[None, :, :], dtype=torch.float32, device=device)
-            x_lag = torch.tensor(lag_seq[None, :, :], dtype=torch.float32, device=device)
-            x_pid = torch.tensor([province_idx], dtype=torch.long, device=device)
-
-            res_hat = float(model(x_dyn, x_lag, x_pid).cpu().item())
-            pred_residual[i] = res_hat
-            pred_log_co2[i] = float(province_df.loc[i, "stirpat_log_pred"]) + res_hat
-
-    province_df["pred_residual"] = pred_residual
-    province_df["pred_log_co2"] = pred_log_co2
-    province_df["pred_co2"] = province_df["pred_log_co2"].map(lambda x: float(np.exp(x)))
-
-    mae = (province_df["true_co2"] - province_df["pred_co2"]).abs().mean()
-    mape = ((province_df["true_co2"] - province_df["pred_co2"]).abs() / province_df["true_co2"]).mean() * 100
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(
-        province_df["year"],
-        province_df["true_co2"],
-        color="#1f77b4",
-        linewidth=2.2,
-        marker="o",
-        markersize=4,
-        label="Original CO2",
-    )
-    ax.plot(
-        province_df["year"],
-        province_df["stirpat_co2"],
-        color="#6c757d",
-        linewidth=1.8,
-        linestyle=":",
-        label="STIRPAT Baseline",
-    )
-    ax.plot(
-        province_df["year"],
-        province_df["pred_co2"],
-        color="#d62728",
-        linewidth=2.2,
-        marker="s",
-        markersize=4,
-        linestyle="--",
-        label="Predicted CO2 (Hybrid, Recursive Inference)",
-    )
-
-    ax.set_title(
-        f"{args.province} CO2: Original vs Predicted ({args.start_year}-{args.end_year})",
-        fontsize=13,
-    )
-    ax.set_xlabel("Year")
-    ax.set_ylabel("CO2")
-    ax.grid(True, alpha=0.25, linestyle="--")
-    ax.legend()
-
-    metric_text = f"MAE={mae:.3f}    MAPE={mape:.2f}%    window={window}"
-    ax.text(
-        0.01,
-        0.98,
-        metric_text,
-        transform=ax.transAxes,
-        va="top",
-        fontsize=10,
-        bbox=dict(facecolor="white", alpha=0.8, edgecolor="#bbbbbb"),
-    )
-
-    figure_path = output_dir / f"{args.province}_{args.start_year}_{args.end_year}_original_vs_pred.png"
-    data_path = output_dir / f"{args.province}_{args.start_year}_{args.end_year}_original_vs_pred.csv"
-
-    fig.tight_layout()
-    fig.savefig(str(figure_path), dpi=300)
-    plt.close(fig)
-
-    province_df[
-        [
-            "province",
-            "year",
-            "true_co2",
-            "stirpat_co2",
-            "pred_residual",
-            "pred_log_co2",
-            "pred_co2",
-        ]
-    ].to_csv(data_path, index=False)
-
-    print(f"Saved figure: {figure_path}")
-    print(f"Saved data:   {data_path}")
-    print(f"Rows: {len(province_df)}; MAE={mae:.3f}; MAPE={mape:.2f}%")
+    print(f"Saved summary: {summary_path}")
+    print(f"Used train-fitted normalization stats from NPZ: {dataset_npz}")
     print(f"Inference uses recursive residual prediction only (no true residual labels). Device: {device}")
 
 

@@ -1,0 +1,43 @@
+{
+  "config": {
+    "dataset_npz": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Dataset\\output\\stirpat_ee_gru_dataset.npz",
+    "model_ckpt": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Model\\output\\best_ee_gru.pt",
+    "output_json": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Model\\output\\reconstruction_metrics.json",
+    "output_detail_dir": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Model\\output",
+    "batch_size": 256
+  },
+  "metrics": {
+    "train": {
+      "stirpat_only": {
+        "mae": 2.708207845687866,
+        "rmse": 4.4491424560546875,
+        "mape": 0.01420089416205883,
+        "smape": 0.014185583218932152,
+        "r2": 0.9993436520151896
+      },
+      "hybrid_reconstruct": {
+        "mae": 1.758844256401062,
+        "rmse": 2.7591707706451416,
+        "mape": 0.009923211298882961,
+        "smape": 0.009912820532917976,
+        "r2": 0.9997475712949836
+      }
+    },
+    "valid": {
+      "stirpat_only": {
+        "mae": 8.675141334533691,
+        "rmse": 12.414628028869629,
+        "mape": 0.024106528609991074,
+        "smape": 0.023989472538232803,
+        "r2": 0.9970435074266425
+      },
+      "hybrid_reconstruct": {
+        "mae": 5.202408313751221,
+        "rmse": 7.87195348739624,
+        "mape": 0.013723614625632763,
+        "smape": 0.013717529363930225,
+        "r2": 0.9988112941102475
+      }
+    }
+  }
+}

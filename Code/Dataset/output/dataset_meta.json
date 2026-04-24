@@ -1,0 +1,32 @@
+{
+  "config": {
+    "input_csv": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Preprocess\\output\\panel_master.csv",
+    "output_npz": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Dataset\\output\\stirpat_ee_gru_dataset.npz",
+    "output_panel_csv": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Dataset\\output\\panel_with_residual.csv",
+    "output_meta_json": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Dataset\\output\\dataset_meta.json",
+    "window": 3,
+    "train_end_year": 2020,
+    "valid_start_year": 2021,
+    "valid_end_year": 2023,
+    "ridge_alpha": 1.0
+  },
+  "stirpat_feature_names": [
+    "log_Population",
+    "log_pGDP",
+    "Industry",
+    "Urbanization",
+    "CoalShare",
+    "log_CarbonIntensity",
+    "log_Energy",
+    "log_PrivateCars"
+  ],
+  "num_provinces": 30,
+  "year_range": [
+    1990,
+    2023
+  ],
+  "splits": {
+    "train": "<= 2020",
+    "valid": "2021-2023"
+  }
+}

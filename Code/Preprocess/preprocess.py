@@ -1055,6 +1055,78 @@ def read_provincial_transport_mileage_and_private_cars(items: List[dict]) -> pd.
 	return out.sort_values(["province", "year"]).reset_index(drop=True)
 
 
+def log_mean(a: float, b: float) -> Optional[float]:
+	"""计算对数均值，用于 LMDI 加法分解。"""
+
+	if a <= 0 or b <= 0:
+		return None
+	if abs(a - b) < 1e-12:
+		return float(a)
+	la = np.log(a)
+	lb = np.log(b)
+	if abs(la - lb) < 1e-12:
+		return float(a)
+	return float((a - b) / (la - lb))
+
+
+def compute_lmdi_time(panel: pd.DataFrame) -> pd.DataFrame:
+	"""按省份逐年计算四因子 LMDI: CO2 = Population * A * B * C。"""
+
+	rows: List[dict] = []
+	panel_sorted = sort_panel_by_province_year(panel)
+
+	for province, g in panel_sorted.groupby("province"):
+		g = cast(pd.DataFrame, g.reset_index(drop=True))
+		for i in range(1, len(g)):
+			prev = g.iloc[i - 1]
+			curr = g.iloc[i]
+
+			e0 = float(prev["CO2"])
+			et = float(curr["CO2"])
+			p0 = float(prev["Population"])
+			pt = float(curr["Population"])
+			a0 = float(prev["A"])
+			at = float(curr["A"])
+			b0 = float(prev["B"])
+			bt = float(curr["B"])
+			c0 = float(prev["C"])
+			ct = float(curr["C"])
+
+			vals = [e0, et, p0, pt, a0, at, b0, bt, c0, ct]
+			if not all(np.isfinite(v) and v > 0 for v in vals):
+				continue
+
+			lm = log_mean(et, e0)
+			if lm is None:
+				continue
+
+			d_p = lm * np.log(pt / p0)
+			d_a = lm * np.log(at / a0)
+			d_b = lm * np.log(bt / b0)
+			d_c = lm * np.log(ct / c0)
+			d_co2 = et - e0
+			resid = d_co2 - (d_p + d_a + d_b + d_c)
+			resid_ratio_abs = abs(resid) / max(abs(d_co2), 1e-12)
+
+			rows.append(
+				{
+					"province": province,
+					"year": int(curr["year"]),
+					"base_year": int(prev["year"]),
+					"delta_CO2": d_co2,
+					"delta_P": d_p,
+					"delta_A": d_a,
+					"delta_B": d_b,
+					"delta_C": d_c,
+					"lmdi_residual": resid,
+					"resid_ratio": resid_ratio_abs,
+					"lmdi_residual_abs_ratio": resid_ratio_abs,
+				}
+			)
+
+	return pd.DataFrame(rows)
+
+
 def main() -> None:
 	"""执行数据预处理主流程并写出结果文件。"""
 
@@ -1169,14 +1241,25 @@ def main() -> None:
 
 	# Keep rows where CO2 exists; remaining variables are filled by available controls.
 	panel_core = sort_panel_by_province_year(panel_core)
+	lmdi_df = compute_lmdi_time(panel_core)
+	lmdi_residual_ratio_stats = {}
+	if not lmdi_df.empty and "lmdi_residual_abs_ratio" in lmdi_df.columns:
+		lmdi_residual_ratio_stats = {
+			"mean": float(lmdi_df["lmdi_residual_abs_ratio"].mean()),
+			"median": float(lmdi_df["lmdi_residual_abs_ratio"].median()),
+			"p90": float(lmdi_df["lmdi_residual_abs_ratio"].quantile(0.9)),
+			"max": float(lmdi_df["lmdi_residual_abs_ratio"].max()),
+		}
 
 	log_progress("写出结果文件")
 
 	panel_path = OUT_DIR / "panel_master.csv"
+	lmdi_path = OUT_DIR / "lmdi_decomposition.csv"
 	audit_path = OUT_DIR / "panel_source_audit.csv"
 	summary_path = OUT_DIR / "panel_build_summary.json"
 
 	panel_core.to_csv(panel_path, index=False, encoding="utf-8-sig")
+	lmdi_df.to_csv(lmdi_path, index=False, encoding="utf-8-sig")
 
 	audit_cols = [
 		c
@@ -1191,6 +1274,7 @@ def main() -> None:
 		"year_min": int(panel_core["year"].min()) if len(panel_core) else None,
 		"year_max": int(panel_core["year"].max()) if len(panel_core) else None,
 		"co2_source_counts": panel_core["CO2_source"].value_counts(dropna=False).to_dict(),
+		"lmdi_residual_abs_ratio_stats": lmdi_residual_ratio_stats,
 		"missing_ratio": {
 			c: float(panel_core[c].isna().mean())
 			for c in [
@@ -1233,6 +1317,7 @@ def main() -> None:
 		else {},
 		"notes": [
 			"CO2 uses MEIC provincial total emissions only (1990-2023).",
+			"LMDI uses the four-factor Kaya identity: CO2 = Population * A * B * C.",
 			"Energy is aggregated after converting fuel-specific total final consumption into standard coal equivalent (tce).",
 			"CoalShare is defined as coal-group tce divided by total final consumption tce.",
 			"All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
@@ -1245,6 +1330,7 @@ def main() -> None:
 
 	log_progress("预处理流程完成")
 	print("WROTE", panel_path)
+	print("WROTE", lmdi_path)
 	print("WROTE", audit_path)
 	print("WROTE", summary_path)
 	print("PANEL_ROWS", summary["panel_rows"], "PROVINCES", summary["province_count"], "YEARS", summary["year_min"], summary["year_max"])

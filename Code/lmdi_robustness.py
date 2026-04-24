@@ -14,10 +14,10 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = ROOT / "Code" / "output"
-PANEL_PATH = OUTPUT_DIR / "panel_master.csv"
-LMDI_PATH = OUTPUT_DIR / "lmdi_decomposition.csv"
-SUMMARY_PATH = OUTPUT_DIR / "lmdi_robustness_summary.md"
+LMDI_OUTPUT_DIR = ROOT / "Code" / "LMDI" / "output"
+PANEL_PATH = ROOT / "Code" / "Dataset" / "output" / "panel_with_residual.csv"
+LMDI_PATH = LMDI_OUTPUT_DIR / "lmdi_decomposition.csv"
+SUMMARY_PATH = LMDI_OUTPUT_DIR / "lmdi_robustness_summary.md"
 
 
 EAST = {"Beijing", "Tianjin", "Hebei", "Liaoning", "Shanghai", "Jiangsu", "Zhejiang", "Fujian", "Shandong", "Guangdong", "Hainan"}
@@ -127,16 +127,6 @@ def make_sample(panel: pd.DataFrame, min_year: int | None = None, observed_energ
 	return data.reset_index(drop=True)
 
 
-def factor_panel_five(panel: pd.DataFrame) -> pd.DataFrame:
-	out = panel[["province", "year", "CO2", "GDP", "Population", "Energy", "Industry"]].copy()
-	out["P"] = pd.to_numeric(out["Population"], errors="coerce")
-	out["A"] = pd.to_numeric(out["GDP"], errors="coerce") / pd.to_numeric(out["Population"], errors="coerce")
-	out["S"] = pd.to_numeric(out["Industry"], errors="coerce") / 100.0
-	out["B"] = pd.to_numeric(out["Energy"], errors="coerce") / (pd.to_numeric(out["GDP"], errors="coerce") * out["S"])
-	out["C"] = pd.to_numeric(out["CO2"], errors="coerce") / pd.to_numeric(out["Energy"], errors="coerce")
-	return out
-
-
 def factor_panel_four(panel: pd.DataFrame) -> pd.DataFrame:
 	out = panel[["province", "year", "CO2", "GDP", "Population", "Energy"]].copy()
 	out["P"] = pd.to_numeric(out["Population"], errors="coerce")
@@ -155,90 +145,86 @@ def fmt(x: float, digits: int = 3) -> str:
 	return f"{value:.{digits}f}"
 
 
-def write_markdown(current_lmdi: pd.DataFrame, five: pd.DataFrame, four: pd.DataFrame, five_late: pd.DataFrame, five_obs_energy: pd.DataFrame) -> None:
+def write_markdown(current_lmdi: pd.DataFrame, baseline: pd.DataFrame, late: pd.DataFrame, observed_energy: pd.DataFrame) -> None:
 	lines: List[str] = []
 	lines.append("# LMDI Robustness and Extensions")
 	lines.append("")
 	lines.append("## 1. Identification boundary")
-	lines.append("本文采用恒等式分解而非因果识别，因此结论应解释为贡献分解，不应直接表述为结构性因果效应。GDP、能源强度与产业结构之间存在耦合关系，LMDI 的目标是将这种耦合拆解为可解释贡献，而不是估计独立结构参数。")
+	lines.append("本文采用恒等式分解而非因果识别，因此结论应解释为贡献分解，不应直接表述为结构性因果效应。当前版本与 STIRPAT 扩展模型保持一致，采用四因子口径。")
 	lines.append("")
 	lines.append("## 2. Residual diagnostics")
-	current_stats = full_summary(current_lmdi, [c for c, _ in [("delta_P", "P"), ("delta_A", "A"), ("delta_S", "S"), ("delta_B", "B"), ("delta_C", "C")]])
+	current_stats = full_summary(current_lmdi, [c for c, _ in [("delta_P", "P"), ("delta_A", "A"), ("delta_B", "B"), ("delta_C", "C")]])
 	lines.append(f"- Full sample residual mean: {fmt(current_stats['mean'], 3)}")
 	lines.append(f"- Full sample residual median: {fmt(current_stats['50%'], 3)}")
 	lines.append(f"- Full sample residual p90: {fmt(current_stats['90%'], 3)}")
 	lines.append(f"- Full sample residual max: {fmt(current_stats['max'], 3)}")
-	lines.append("- Interpretation: residuals stay near zero, so the five-factor decomposition is internally consistent.")
+	lines.append("- Interpretation: residuals stay near zero, so the four-factor decomposition is internally consistent.")
 	lines.append("")
-	lines.append("## 3. Variable-definition robustness")
-	lines.append("### 3.1 Five-factor vs four-factor specification")
-	five_tot = five[["delta_P", "delta_A", "delta_S", "delta_B", "delta_C", "delta_CO2"]].sum()
-	four_tot = four[["delta_P", "delta_A", "delta_B", "delta_C"]].sum()
-	lines.append(f"- Five-factor totals: P={fmt(five_tot['delta_P'])}, A={fmt(five_tot['delta_A'])}, S={fmt(five_tot['delta_S'])}, B={fmt(five_tot['delta_B'])}, C={fmt(five_tot['delta_C'])}, net={fmt(five_tot['delta_CO2'])}")
-	lines.append(f"- Four-factor totals: P={fmt(four_tot['delta_P'])}, A={fmt(four_tot['delta_A'])}, B={fmt(four_tot['delta_B'])}, C={fmt(four_tot['delta_C'])}")
-	lines.append(f"- The structural term S is not redundant: once industry structure is separated, the energy-intensity term B shifts from {fmt(five_tot['delta_B'])} to {fmt(four_tot['delta_B'])}, showing that structural adjustment had been embedded inside the composite intensity term in the four-factor specification.")
-	lines.append("- This comparison supports using the five-factor version as the preferred specification in the paper body, with the four-factor version reported as a robustness benchmark.")
+	lines.append("## 3. Variable-definition alignment")
+	baseline_tot = baseline[["delta_P", "delta_A", "delta_B", "delta_C", "delta_CO2"]].sum()
+	lines.append(f"- Four-factor totals: P={fmt(baseline_tot['delta_P'])}, A={fmt(baseline_tot['delta_A'])}, B={fmt(baseline_tot['delta_B'])}, C={fmt(baseline_tot['delta_C'])}, net={fmt(baseline_tot['delta_CO2'])}")
+	lines.append("- B is defined as Energy/GDP and C as CO2/Energy, consistent with STIRPAT-side CarbonIntensity = B*C.")
 	lines.append("")
 	lines.append("## 4. Sample-window robustness")
 	lines.append("### 4.1 Baseline vs late-sample re-estimation")
 	lines.append(f"- Baseline sample (1990-2022) residual mean: {fmt(current_lmdi['lmdi_residual_abs_ratio'].mean(), 3)}")
-	lines.append(f"- Late sample (2000-2022) residual mean: {fmt(five_late['lmdi_residual_abs_ratio'].mean(), 3)}")
+	lines.append(f"- Late sample (2000-2022) residual mean: {fmt(late['lmdi_residual_abs_ratio'].mean(), 3)}")
 	lines.append("- Sign patterns are preserved in both samples: GDP per capita remains the dominant positive driver, while energy intensity remains the main negative driver.")
 	lines.append("- Practical reading: the main narrative is not generated by early-period interpolation alone; it survives when the sample is restricted to the later period.")
 	lines.append("")
 	lines.append("## 5. Data-processing robustness")
 	lines.append("### 5.1 Observed-energy subset")
-	lines.append(f"- Observed-energy subset residual mean: {fmt(five_obs_energy['lmdi_residual_abs_ratio'].mean(), 3)}")
-	lines.append(f"- Observed-energy subset pair count: {int(len(five_obs_energy))}")
+	lines.append(f"- Observed-energy subset residual mean: {fmt(observed_energy['lmdi_residual_abs_ratio'].mean(), 3)}")
+	lines.append(f"- Observed-energy subset pair count: {int(len(observed_energy))}")
 	lines.append("- This check is stricter because it drops rows marked as national-proxy energy. The fact that residuals remain tiny indicates that the decomposition identity itself is not sensitive to the energy reconstruction step.")
 	lines.append("")
 	lines.append("## 6. Regional heterogeneity")
-	region = build_region_table(current_lmdi, ["delta_P", "delta_A", "delta_S", "delta_B", "delta_C"])
+	region = build_region_table(current_lmdi, ["delta_P", "delta_A", "delta_B", "delta_C"])
 	for _, row in region.iterrows():
-		lines.append(f"- {row['region']}: P={fmt(row['delta_P'])}, A={fmt(row['delta_A'])}, S={fmt(row['delta_S'])}, B={fmt(row['delta_B'])}, C={fmt(row['delta_C'])}, net={fmt(row['delta_CO2'])}")
+		lines.append(f"- {row['region']}: P={fmt(row['delta_P'])}, A={fmt(row['delta_A'])}, B={fmt(row['delta_B'])}, C={fmt(row['delta_C'])}, net={fmt(row['delta_CO2'])}")
 	lines.append("- Interpretation: East China bears the largest absolute mitigation contribution, Central China is intermediate, and West China remains more constrained by energy dependence and structural inertia.")
 	lines.append("")
 	lines.append("## 7. Period decomposition")
-	period_table = build_period_table(current_lmdi, ["delta_P", "delta_A", "delta_S", "delta_B", "delta_C"])
+	period_table = build_period_table(current_lmdi, ["delta_P", "delta_A", "delta_B", "delta_C"])
 	for item in period_table:
 		shares = item["shares"]
 		lines.append(
-			f"- {item['period']}: net={fmt(item['net_change'])}, shares(P/A/S/B/C)="
-			f"{fmt(shares['delta_P'], 3)}/{fmt(shares['delta_A'], 3)}/{fmt(shares['delta_S'], 3)}/{fmt(shares['delta_B'], 3)}/{fmt(shares['delta_C'], 3)}"
+			f"- {item['period']}: net={fmt(item['net_change'])}, shares(P/A/B/C)="
+			f"{fmt(shares['delta_P'], 3)}/{fmt(shares['delta_A'], 3)}/{fmt(shares['delta_B'], 3)}/{fmt(shares['delta_C'], 3)}"
 		)
 	lines.append("- Write-up hint: use the period table to show when structural adjustment begins to materially offset GDP growth, instead of merely saying 'the trend changes over time'.")
 	lines.append("")
 	lines.append("## 8. Regression extension")
-	lines.append("If time permits, add a two-way fixed-effects check: ln(CO2) on ln(P), ln(A), ln(B), ln(C) and S. The purpose is not causal identification, but to show that the sign pattern is consistent with the LMDI decomposition. Keep the regression as a supplementary robustness appendix, not the core identification strategy.")
+	lines.append("If time permits, add a two-way fixed-effects check: ln(CO2) on ln(P), ln(A), ln(B), ln(C). The purpose is not causal identification, but to show that the sign pattern is consistent with the LMDI decomposition. Keep the regression as a supplementary robustness appendix, not the core identification strategy.")
 	lines.append("")
 	lines.append("## 9. Paper-facing conclusion")
-	lines.append("1. The five-factor specification is preferable because it isolates industry structure from energy intensity.")
+	lines.append("1. The four-factor specification is aligned with the current STIRPAT-expanded modeling pipeline.")
 	lines.append("2. Residual diagnostics show near-zero discrepancy, so the decomposition is numerically stable.")
 	lines.append("3. The main narrative survives both later-sample and observed-energy restrictions, reducing the risk that the result is an artifact of one data-processing choice.")
 	SUMMARY_PATH.write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> None:
-	if not PANEL_PATH.exists() or not LMDI_PATH.exists():
-		raise FileNotFoundError("Required output CSVs are missing.")
+	LMDI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+	if not PANEL_PATH.exists():
+		raise FileNotFoundError(f"Missing required panel input: {PANEL_PATH}")
 	panel = pd.read_csv(PANEL_PATH)
-	current_lmdi = pd.read_csv(LMDI_PATH)
-	five_panel = factor_panel_five(panel)
 	four_panel = factor_panel_four(panel)
+	current_lmdi = compute_lmdi(four_panel, [("delta_P", "P"), ("delta_A", "A"), ("delta_B", "B"), ("delta_C", "C")])
+	current_lmdi.to_csv(LMDI_PATH, index=False, encoding="utf-8")
+	baseline = current_lmdi.copy()
+	late = compute_lmdi(factor_panel_four(make_sample(panel, min_year=2000)), [("delta_P", "P"), ("delta_A", "A"), ("delta_B", "B"), ("delta_C", "C")])
+	observed_energy = compute_lmdi(
+		factor_panel_four(make_sample(panel, observed_energy_only=True)),
+		[("delta_P", "P"), ("delta_A", "A"), ("delta_B", "B"), ("delta_C", "C")],
+	)
 
-	five = compute_lmdi(five_panel, [("delta_P", "P"), ("delta_A", "A"), ("delta_S", "S"), ("delta_B", "B"), ("delta_C", "C")])
-	four = compute_lmdi(four_panel, [("delta_P", "P"), ("delta_A", "A"), ("delta_B", "B"), ("delta_C", "C")])
-
-	five_full = current_lmdi.copy()
-	five_late = compute_lmdi(factor_panel_five(make_sample(panel, min_year=2000)), [("delta_P", "P"), ("delta_A", "A"), ("delta_S", "S"), ("delta_B", "B"), ("delta_C", "C")])
-	five_obs_energy = compute_lmdi(factor_panel_five(make_sample(panel, observed_energy_only=True)), [("delta_P", "P"), ("delta_A", "A"), ("delta_S", "S"), ("delta_B", "B"), ("delta_C", "C")])
-
-	write_markdown(current_lmdi, five, four, five_late, five_obs_energy)
+	write_markdown(current_lmdi, baseline, late, observed_energy)
+	print(f"WROTE {LMDI_PATH}")
 	print(f"WROTE {SUMMARY_PATH}")
-	print("FIVE_RESID_MAX", float(five['lmdi_residual_abs_ratio'].max()))
-	print("FOUR_RESID_MAX", float(four['lmdi_residual_abs_ratio'].max()))
-	print("LATE_RESID_MEAN", float(five_late['lmdi_residual_abs_ratio'].mean()))
-	print("OBS_ENERGY_RESID_MEAN", float(five_obs_energy['lmdi_residual_abs_ratio'].mean()))
+	print("FOUR_RESID_MAX", float(baseline['lmdi_residual_abs_ratio'].max()))
+	print("LATE_RESID_MEAN", float(late['lmdi_residual_abs_ratio'].mean()))
+	print("OBS_ENERGY_RESID_MEAN", float(observed_energy['lmdi_residual_abs_ratio'].mean()))
 
 
 if __name__ == "__main__":

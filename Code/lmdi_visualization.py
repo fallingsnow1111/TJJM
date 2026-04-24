@@ -18,23 +18,21 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = ROOT / "Code" / "output"
-FIGURE_DIR = OUTPUT_DIR / "figures"
-LMDI_PATH = OUTPUT_DIR / "lmdi_decomposition.csv"
-PANEL_PATH = OUTPUT_DIR / "panel_master.csv"
+LMDI_OUTPUT_DIR = ROOT / "Code" / "LMDI" / "output"
+FIGURE_DIR = LMDI_OUTPUT_DIR / "figures"
+LMDI_PATH = LMDI_OUTPUT_DIR / "lmdi_decomposition.csv"
+PANEL_PATH = ROOT / "Code" / "Dataset" / "output" / "panel_with_residual.csv"
 
-FACTOR_ORDER = ["delta_P", "delta_A", "delta_S", "delta_B", "delta_C"]
+FACTOR_ORDER = ["delta_P", "delta_A", "delta_B", "delta_C"]
 FACTOR_LABELS = {
 	"delta_P": "Population",
 	"delta_A": "GDP per capita",
-	"delta_S": "Industry structure",
 	"delta_B": "Energy intensity",
 	"delta_C": "Emission factor",
 }
 FACTOR_COLORS = {
 	"delta_P": "#4C78A8",
 	"delta_A": "#F58518",
-	"delta_S": "#54A24B",
 	"delta_B": "#72B7B2",
 	"delta_C": "#9D755D",
 }
@@ -64,7 +62,7 @@ def annual_totals(lmdi: pd.DataFrame) -> pd.DataFrame:
 def province_totals(lmdi: pd.DataFrame) -> pd.DataFrame:
 	cols = FACTOR_ORDER + ["delta_CO2"]
 	province = lmdi.groupby("province", as_index=False)[cols].sum()
-	province["mitigation_score"] = -(province["delta_S"] + province["delta_B"])
+	province["mitigation_score"] = -(province["delta_B"] + province["delta_C"])
 	province["net_change"] = province["delta_CO2"]
 	province = province.sort_values("mitigation_score", ascending=False).reset_index(drop=True)
 	return province
@@ -183,14 +181,14 @@ def make_spatial_chart(province: pd.DataFrame, out_path: Path) -> None:
 
 
 def write_run_summary(annual: pd.DataFrame, province: pd.DataFrame) -> None:
-	summary_path = OUTPUT_DIR / "lmdi_visual_summary.md"
+	summary_path = LMDI_OUTPUT_DIR / "lmdi_visual_summary.md"
 	full = annual[FACTOR_ORDER + ["delta_CO2"]].sum()
 	top = province.head(8)[["province", "mitigation_score", "net_change"]]
 	bottom = province.sort_values("net_change", ascending=True).head(8)[["province", "mitigation_score", "net_change"]]
 	lines: List[str] = []
 	lines.append("# LMDI Figure Summary")
 	lines.append("")
-	lines.append(f"- Cumulative totals: P {full['delta_P']:.3f}, A {full['delta_A']:.3f}, S {full['delta_S']:.3f}, B {full['delta_B']:.3f}, C {full['delta_C']:.3f}, net {full['delta_CO2']:.3f}")
+	lines.append(f"- Cumulative totals: P {full['delta_P']:.3f}, A {full['delta_A']:.3f}, B {full['delta_B']:.3f}, C {full['delta_C']:.3f}, net {full['delta_CO2']:.3f}")
 	lines.append(f"- Figure directory: {FIGURE_DIR}")
 	lines.append("")
 	lines.append("## Highest mitigation score provinces")
@@ -217,7 +215,7 @@ def main() -> None:
 	print("WROTE", FIGURE_DIR / "cumulative_waterfall.png")
 	print("WROTE", FIGURE_DIR / "stacked_timeseries.png")
 	print("WROTE", FIGURE_DIR / "spatial_heterogeneity.png")
-	print("WROTE", OUTPUT_DIR / "lmdi_visual_summary.md")
+	print("WROTE", LMDI_OUTPUT_DIR / "lmdi_visual_summary.md")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,43 @@
+{
+  "config": {
+    "dataset_npz": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\dataset\\stirpat_ee_gru_dataset.npz",
+    "model_ckpt": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\model\\best_ee_gru.pt",
+    "output_json": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\model\\reconstruction_metrics.json",
+    "output_detail_dir": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\model",
+    "batch_size": 256
+  },
+  "metrics": {
+    "train": {
+      "stirpat_only": {
+        "mae": 2.708207845687866,
+        "rmse": 4.4491424560546875,
+        "mape": 0.01420089416205883,
+        "smape": 0.014185583218932152,
+        "r2": 0.9993436520151896
+      },
+      "hybrid_reconstruct": {
+        "mae": 1.8476006984710693,
+        "rmse": 2.868103265762329,
+        "mape": 0.010250820778310299,
+        "smape": 0.01024585124105215,
+        "r2": 0.9997272459521939
+      }
+    },
+    "valid": {
+      "stirpat_only": {
+        "mae": 8.675141334533691,
+        "rmse": 12.414628028869629,
+        "mape": 0.024106528609991074,
+        "smape": 0.023989472538232803,
+        "r2": 0.9970435074266425
+      },
+      "hybrid_reconstruct": {
+        "mae": 5.297451019287109,
+        "rmse": 7.863696098327637,
+        "mape": 0.014143065549433231,
+        "smape": 0.014126276597380638,
+        "r2": 0.998813786651847
+      }
+    }
+  }
+}

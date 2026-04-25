@@ -1,0 +1,14 @@
+{
+  "description": "Organized scenario forecast package",
+  "year_range": [
+    2024,
+    2035
+  ],
+  "files": {
+    "combined_long": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast\\organized\\00_combined_long.csv",
+    "province_yearly_detail": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast\\organized\\01_province_yearly_detail.csv",
+    "province_peak_summary": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast\\organized\\02_province_peak_summary.csv",
+    "national_yearly": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast\\organized\\03_national_yearly.csv",
+    "national_peak_summary": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast\\organized\\04_national_peak_summary.csv"
+  }
+}

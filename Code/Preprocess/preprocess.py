@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 
 PREPROCESS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PREPROCESS_DIR.parents[1]
-DATASET_ROOT = PROJECT_ROOT / "Dataset"
+DATASET_ROOT = PROJECT_ROOT / "Raw"
 SUMMARY_JSON = PREPROCESS_DIR / "dataset_index_summary.json"
 OUT_DIR = PREPROCESS_DIR / "output"
 
@@ -53,6 +53,23 @@ COAL_FUEL_HEADERS = {
 	"Other_Gas",
 	"Other_Coking_Products",
 }
+
+PETROLEUM_HEADERS = {
+	"Crude_Oil",
+	"Gasoline",
+	"Kerosene",
+	"Diesel_Oil",
+	"Fuel_Oil",
+	"LPG",
+	"Refinery_Gas",
+	"Other_Petroleum_Products",
+}
+
+GAS_HEADERS = {"Natural_Gas"}
+
+NON_FOSSIL_HEADERS = {"Heat", "Electricity", "Other_Energy"}
+
+NATIONAL_ENERGY_TOTAL_PATH = DATASET_ROOT / "国家维度" / "能源相关" / "1978-2025能源消费总量.xlsx"
 
 
 # Canonical province names aligned to inventory/MEIC naming.
@@ -163,8 +180,32 @@ def load_dataset_index() -> List[dict]:
 	items = payload["items"]
 	for item in items:
 		path = str(item.get("path", ""))
+		resolved = ""
 		if path and not Path(path).is_absolute():
-			item["path"] = str(PROJECT_ROOT / path)
+			resolved = str(PROJECT_ROOT / path)
+		elif path:
+			resolved = path
+
+		if not resolved:
+			continue
+
+		p = Path(resolved)
+		if p.exists():
+			item["path"] = str(p)
+			continue
+
+		# Backward-compatible remap for older index files using Dataset root.
+		candidates = [
+			resolved.replace("\\Dataset\\", "\\Raw\\"),
+			resolved.replace("/Dataset/", "/Raw/"),
+			resolved.replace("\\dataset\\", "\\Raw\\"),
+			resolved.replace("/dataset/", "/Raw/"),
+		]
+		for cand in candidates:
+			alt = Path(cand)
+			if alt.exists():
+				item["path"] = str(alt)
+				break
 	return items
 
 
@@ -206,6 +247,8 @@ def parse_year_cell(v) -> Optional[int]:
 	"""解析单元格中的年份值。"""
 
 	if isinstance(v, (int, float)):
+		if pd.isna(v):
+			return None
 		iv = int(v)
 		if 1900 <= iv <= 2100:
 			return iv
@@ -352,7 +395,7 @@ def build_co2_panel(items: List[dict]) -> pd.DataFrame:
 
 
 def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
-	"""读取省级能源清单并按折标煤汇总Energy，同时计算煤炭消费占比CoalShare。"""
+	"""读取省级能源清单并按折标煤汇总Energy，同时计算煤/油/气/非化石占比。"""
 
 	records: List[dict] = []
 
@@ -399,6 +442,9 @@ def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
 
 				total_tce = 0.0
 				coal_tce = 0.0
+				oil_tce = 0.0
+				gas_tce = 0.0
+				nonfossil_tce = 0.0
 				has_effective_value = False
 				for c in range(2, max_col + 1):
 					header = ws.cell(row=1, column=c).value
@@ -418,22 +464,44 @@ def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
 					has_effective_value = True
 					if header in COAL_FUEL_HEADERS:
 						coal_tce += contrib_tce
+					elif header in PETROLEUM_HEADERS:
+						oil_tce += contrib_tce
+					elif header in GAS_HEADERS:
+						gas_tce += contrib_tce
+					elif header in NON_FOSSIL_HEADERS:
+						nonfossil_tce += contrib_tce
 
 				if not has_effective_value or total_tce <= 0:
 					continue
 
 				coal_share = (coal_tce / total_tce) * 100.0 if total_tce > 0 else np.nan
+				oil_share = (oil_tce / total_tce) * 100.0 if total_tce > 0 else np.nan
+				gas_share = (gas_tce / total_tce) * 100.0 if total_tce > 0 else np.nan
+				nonfossil_share = (nonfossil_tce / total_tce) * 100.0 if total_tce > 0 else np.nan
 
 				records.append(
 					{
 						"province": province,
 						"year": int(year),
 						"Energy": float(total_tce),
+						"CoalTCE": float(coal_tce),
+						"OilTCE": float(oil_tce),
+						"GasTCE": float(gas_tce),
+						"NonFossilTCE": float(nonfossil_tce),
 						"Energy_source": "Provincial_energy_inventory_1997_2022_total_final_consumption_tce_converted",
 						"Energy_is_national_proxy": 0,
 						"CoalShare": float(coal_share),
+						"OilShare": float(oil_share),
+						"GasShare": float(gas_share),
+						"NonFossilShare": float(nonfossil_share),
 						"CoalShare_source": "Provincial_coal_share_from_total_final_consumption_tce_converted",
 						"CoalShare_is_national_proxy": 0,
+						"OilShare_source": "Provincial_oil_share_from_total_final_consumption_tce_converted",
+						"OilShare_is_national_proxy": 0,
+						"GasShare_source": "Provincial_gas_share_from_total_final_consumption_tce_converted",
+						"GasShare_is_national_proxy": 0,
+						"NonFossilShare_source": "Provincial_nonfossil_share_from_total_final_consumption_tce_converted",
+						"NonFossilShare_is_national_proxy": 0,
 					}
 				)
 		finally:
@@ -446,11 +514,24 @@ def read_provincial_energy_inventory(items: List[dict]) -> pd.DataFrame:
 				"province",
 				"year",
 				"Energy",
+				"CoalTCE",
+				"OilTCE",
+				"GasTCE",
+				"NonFossilTCE",
 				"Energy_source",
 				"Energy_is_national_proxy",
 				"CoalShare",
+				"OilShare",
+				"GasShare",
+				"NonFossilShare",
 				"CoalShare_source",
 				"CoalShare_is_national_proxy",
+				"OilShare_source",
+				"OilShare_is_national_proxy",
+				"GasShare_source",
+				"GasShare_is_national_proxy",
+				"NonFossilShare_source",
+				"NonFossilShare_is_national_proxy",
 			]
 		)
 
@@ -897,6 +978,122 @@ def fill_coal_share_with_interpolation_and_fit(
 	)
 
 
+def fill_oil_share_with_interpolation_and_fit(
+	panel: pd.DataFrame,
+) -> pd.DataFrame:
+	"""按省级规则补全OilShare。"""
+
+	return fill_share_with_provincial_first(
+		panel=panel,
+		metric="OilShare",
+		interpolation_source="Provincial_oil_share_logit_interpolation",
+		polyfit_source="Provincial_oil_share_logit_polynomial_fit",
+	)
+
+
+def fill_gas_share_with_interpolation_and_fit(
+	panel: pd.DataFrame,
+) -> pd.DataFrame:
+	"""按省级规则补全GasShare。"""
+
+	return fill_share_with_provincial_first(
+		panel=panel,
+		metric="GasShare",
+		interpolation_source="Provincial_gas_share_logit_interpolation",
+		polyfit_source="Provincial_gas_share_logit_polynomial_fit",
+	)
+
+
+def fill_nonfossil_share_with_interpolation_and_fit(
+	panel: pd.DataFrame,
+) -> pd.DataFrame:
+	"""按省级规则补全NonFossilShare。"""
+
+	return fill_share_with_provincial_first(
+		panel=panel,
+		metric="NonFossilShare",
+		interpolation_source="Provincial_nonfossil_share_logit_interpolation",
+		polyfit_source="Provincial_nonfossil_share_logit_polynomial_fit",
+	)
+
+
+def read_national_energy_total(path: Path) -> pd.DataFrame:
+	"""读取全国能源消费总量文件并返回 year-total_energy 两列。"""
+
+	if not path.exists():
+		return pd.DataFrame(columns=["year", "national_energy_total"])
+
+	try:
+		df = pd.read_excel(path, header=2)
+	except Exception:
+		return pd.DataFrame(columns=["year", "national_energy_total"])
+
+	if df.empty:
+		return pd.DataFrame(columns=["year", "national_energy_total"])
+
+	indicator_col = str(df.columns[0])
+	row_mask = df[indicator_col].astype(str).str.contains("能源消费总量", na=False)
+	if not row_mask.any():
+		return pd.DataFrame(columns=["year", "national_energy_total"])
+
+	row = df.loc[row_mask].iloc[0]
+	records: List[dict] = []
+	for col in df.columns[1:]:
+		year = parse_year_cell(str(col)) if isinstance(col, str) else parse_year_cell(col)
+		if year is None:
+			continue
+		v = to_float(row[col])
+		if v is None or not np.isfinite(v):
+			continue
+		records.append({"year": int(year), "national_energy_total": float(v)})
+
+	out = pd.DataFrame(records)
+	if out.empty:
+		return pd.DataFrame(columns=["year", "national_energy_total"])
+
+	out = out[(out["year"] >= 1990) & (out["year"] <= 2025)]
+	out = out.sort_values("year", kind="stable").drop_duplicates(subset=["year"], keep="last")
+	return out.reset_index(drop=True)
+
+
+def build_national_energy_validation(panel_core: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str, float]]:
+	"""对比省级Energy加总与全国能源消费总量，生成校验表与统计。"""
+
+	province_sum = (
+		panel_core.groupby("year", as_index=False)["Energy"]
+		.sum()
+		.rename(columns={"Energy": "province_energy_sum"})
+	)
+	national_df = read_national_energy_total(NATIONAL_ENERGY_TOTAL_PATH)
+
+	if national_df.empty:
+		out = province_sum.copy()
+		out["national_energy_total"] = np.nan
+		out["ratio_actual_over_province_sum"] = np.nan
+		out["diff_actual_minus_province_sum"] = np.nan
+		return out, {}
+
+	out = province_sum.merge(national_df, on="year", how="left")
+	out["ratio_actual_over_province_sum"] = out["national_energy_total"] / out["province_energy_sum"]
+	out["diff_actual_minus_province_sum"] = out["national_energy_total"] - out["province_energy_sum"]
+
+	overlap = out.dropna(subset=["national_energy_total"]).copy()
+	if overlap.empty:
+		return out, {}
+
+	den = np.maximum(overlap["national_energy_total"].abs().to_numpy(dtype=float), 1e-8)
+	mape = np.mean(np.abs((overlap["province_energy_sum"].to_numpy(dtype=float) - overlap["national_energy_total"].to_numpy(dtype=float)) / den))
+	stats = {
+		"overlap_year_count": int(len(overlap)),
+		"overlap_year_min": int(overlap["year"].min()),
+		"overlap_year_max": int(overlap["year"].max()),
+		"corr": float(overlap["province_energy_sum"].corr(overlap["national_energy_total"])),
+		"mape": float(mape),
+		"mean_ratio_actual_over_province_sum": float(overlap["ratio_actual_over_province_sum"].mean()),
+	}
+	return out, stats
+
+
 def read_provincial_transport_mileage_and_private_cars(items: List[dict]) -> pd.DataFrame:
 	"""读取省级交通数据并提取HighwayMileage与PrivateCars观测值。"""
 
@@ -1182,17 +1379,32 @@ def main() -> None:
 
 	panel = fill_urbanization_with_interpolation_fit_and_anchor(panel)
 
-	log_progress("阶段6/7：补全Energy与CoalShare")
+	log_progress("阶段6/7：补全Energy与能源结构占比（Coal/Oil/Gas/NonFossil）")
 	prov_energy = read_provincial_energy_inventory(items)
 	log_observed_coverage("Energy", prov_energy, "Energy")
 	log_observed_coverage("CoalShare", prov_energy, "CoalShare")
+	log_observed_coverage("OilShare", prov_energy, "OilShare")
+	log_observed_coverage("GasShare", prov_energy, "GasShare")
+	log_observed_coverage("NonFossilShare", prov_energy, "NonFossilShare")
 	if not prov_energy.empty:
 		panel = panel.merge(prov_energy, on=["province", "year"], how="left")
 	panel = ensure_metric_columns(panel, "Energy", include_imputed=True)
 	panel = ensure_metric_columns(panel, "CoalShare", include_imputed=True)
+	panel = ensure_metric_columns(panel, "OilShare", include_imputed=True)
+	panel = ensure_metric_columns(panel, "GasShare", include_imputed=True)
+	panel = ensure_metric_columns(panel, "NonFossilShare", include_imputed=True)
 
 	panel = fill_energy_with_interpolation_and_fit(panel)
 	panel = fill_coal_share_with_interpolation_and_fit(panel)
+	panel = fill_oil_share_with_interpolation_and_fit(panel)
+	panel = fill_gas_share_with_interpolation_and_fit(panel)
+	panel = fill_nonfossil_share_with_interpolation_and_fit(panel)
+
+	# Keep TCE decomposition fully populated for all years after share imputation.
+	panel["CoalTCE"] = pd.to_numeric(panel["Energy"], errors="coerce") * pd.to_numeric(panel["CoalShare"], errors="coerce") / 100.0
+	panel["OilTCE"] = pd.to_numeric(panel["Energy"], errors="coerce") * pd.to_numeric(panel["OilShare"], errors="coerce") / 100.0
+	panel["GasTCE"] = pd.to_numeric(panel["Energy"], errors="coerce") * pd.to_numeric(panel["GasShare"], errors="coerce") / 100.0
+	panel["NonFossilTCE"] = pd.to_numeric(panel["Energy"], errors="coerce") * pd.to_numeric(panel["NonFossilShare"], errors="coerce") / 100.0
 
 	log_progress("阶段7/7：补全交通变量（HighwayMileage, PrivateCars）")
 	prov_transport = read_provincial_transport_mileage_and_private_cars(items)
@@ -1227,7 +1439,14 @@ def main() -> None:
 		"GDP",
 		"Population",
 		"Energy",
+		"CoalTCE",
+		"OilTCE",
+		"GasTCE",
+		"NonFossilTCE",
 		"CoalShare",
+		"OilShare",
+		"GasShare",
+		"NonFossilShare",
 		"Industry",
 		"Urbanization",
 		"HighwayMileage",
@@ -1242,6 +1461,7 @@ def main() -> None:
 	# Keep rows where CO2 exists; remaining variables are filled by available controls.
 	panel_core = sort_panel_by_province_year(panel_core)
 	lmdi_df = compute_lmdi_time(panel_core)
+	national_energy_validation_df, national_energy_validation_stats = build_national_energy_validation(panel_core)
 	lmdi_residual_ratio_stats = {}
 	if not lmdi_df.empty and "lmdi_residual_abs_ratio" in lmdi_df.columns:
 		lmdi_residual_ratio_stats = {
@@ -1257,9 +1477,11 @@ def main() -> None:
 	lmdi_path = OUT_DIR / "lmdi_decomposition.csv"
 	audit_path = OUT_DIR / "panel_source_audit.csv"
 	summary_path = OUT_DIR / "panel_build_summary.json"
+	national_energy_validation_path = OUT_DIR / "national_energy_validation.csv"
 
 	panel_core.to_csv(panel_path, index=False, encoding="utf-8-sig")
 	lmdi_df.to_csv(lmdi_path, index=False, encoding="utf-8-sig")
+	national_energy_validation_df.to_csv(national_energy_validation_path, index=False, encoding="utf-8-sig")
 
 	audit_cols = [
 		c
@@ -1282,7 +1504,14 @@ def main() -> None:
 				"GDP",
 				"Population",
 				"Energy",
+				"CoalTCE",
+				"OilTCE",
+				"GasTCE",
+				"NonFossilTCE",
 				"CoalShare",
+				"OilShare",
+				"GasShare",
+				"NonFossilShare",
 				"Industry",
 				"Urbanization",
 				"HighwayMileage",
@@ -1303,6 +1532,15 @@ def main() -> None:
 		"coal_share_source_counts": panel["CoalShare_source"].value_counts(dropna=False).to_dict()
 		if "CoalShare_source" in panel.columns
 		else {},
+		"oil_share_source_counts": panel["OilShare_source"].value_counts(dropna=False).to_dict()
+		if "OilShare_source" in panel.columns
+		else {},
+		"gas_share_source_counts": panel["GasShare_source"].value_counts(dropna=False).to_dict()
+		if "GasShare_source" in panel.columns
+		else {},
+		"nonfossil_share_source_counts": panel["NonFossilShare_source"].value_counts(dropna=False).to_dict()
+		if "NonFossilShare_source" in panel.columns
+		else {},
 		"industry_source_counts": panel["Industry_source"].value_counts(dropna=False).to_dict()
 		if "Industry_source" in panel.columns
 		else {},
@@ -1315,11 +1553,13 @@ def main() -> None:
 		"private_cars_source_counts": panel["PrivateCars_source"].value_counts(dropna=False).to_dict()
 		if "PrivateCars_source" in panel.columns
 		else {},
+		"national_energy_validation_stats": national_energy_validation_stats,
 		"notes": [
 			"CO2 uses MEIC provincial total emissions only (1990-2023).",
 			"LMDI uses the four-factor Kaya identity: CO2 = Population * A * B * C.",
 			"Energy is aggregated after converting fuel-specific total final consumption into standard coal equivalent (tce).",
-			"CoalShare is defined as coal-group tce divided by total final consumption tce.",
+			"Coal/Oil/Gas/NonFossil shares are defined as grouped tce divided by total final consumption tce.",
+			"National energy total series is used for macro validation only and is not used as provincial fill value.",
 			"All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
 			"No national fallback is used in this build.",
 			"HighwayMileage and PrivateCars are integrated from provincial transport dataset.",
@@ -1332,6 +1572,7 @@ def main() -> None:
 	print("WROTE", panel_path)
 	print("WROTE", lmdi_path)
 	print("WROTE", audit_path)
+	print("WROTE", national_energy_validation_path)
 	print("WROTE", summary_path)
 	print("PANEL_ROWS", summary["panel_rows"], "PROVINCES", summary["province_count"], "YEARS", summary["year_min"], summary["year_max"])
 	print("CO2_SOURCE_COUNTS", summary["co2_source_counts"])

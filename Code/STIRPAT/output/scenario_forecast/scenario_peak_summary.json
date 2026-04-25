@@ -8,29 +8,39 @@
     "start_year": 2024,
     "end_year": 2035,
     "window": 3,
-    "train_end_year": 2020
+    "train_end_year": 2020,
+    "national_validation_csv": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\Preprocess\\output\\national_energy_validation.csv",
+    "calibration_year_window": 5
+  },
+  "energy_calibration": {
+    "enabled": true,
+    "window": 5,
+    "factor": 1.3921090607444497,
+    "year_min": 2019,
+    "year_max": 2023,
+    "sample_count": 5
   },
   "scenarios": [
     {
       "scenario": "baseline",
       "peak_year": 2035,
-      "peak_co2": 13514.437771584691,
+      "peak_co2": 791008.9205083774,
       "peaked_within_horizon": false,
       "note": "未在预测期内达峰"
     },
     {
       "scenario": "extensive",
       "peak_year": 2035,
-      "peak_co2": 14321.157655592295,
+      "peak_co2": 933700.7319886643,
       "peaked_within_horizon": false,
       "note": "未在预测期内达峰"
     },
     {
       "scenario": "low_carbon",
-      "peak_year": 2035,
-      "peak_co2": 12753.5228816033,
-      "peaked_within_horizon": false,
-      "note": "未在预测期内达峰"
+      "peak_year": 2024,
+      "peak_co2": 748308.0551465299,
+      "peaked_within_horizon": true,
+      "note": "已达峰"
     }
   ]
 }

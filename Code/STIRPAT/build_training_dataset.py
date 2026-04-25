@@ -107,17 +107,16 @@ def build_residual_target(
 		"Urbanization",
 		"CoalShare",
 		"log_CarbonIntensity",
-		"log_Energy",
 		"log_PrivateCars",
 	]
 
 	model = PanelRidgeSTIRPAT(alpha=ridge_alpha)
 	train_mask = df["year"] <= train_end_year
-	model.fit(df.loc[train_mask], feature_cols=stirpat_cols, target_col="log_CO2", province_col="province")
+	model.fit(df.loc[train_mask], feature_cols=stirpat_cols, target_col="log_Energy", province_col="province")
 
 	df = df.copy()
 	df["stirpat_log_pred"] = model.predict(df, province_col="province")
-	df["residual"] = df["log_CO2"] - df["stirpat_log_pred"]
+	df["residual"] = df["log_Energy"] - df["stirpat_log_pred"]
 	return df, stirpat_cols
 
 
@@ -146,7 +145,7 @@ def make_windows(df: pd.DataFrame, cfg: BuildConfig) -> Dict[str, np.ndarray]:
 	lag_res_list: List[np.ndarray] = []
 	province_list: List[int] = []
 	target_res_list: List[float] = []
-	target_log_co2_list: List[float] = []
+	target_log_energy_list: List[float] = []
 	target_stirpat_log_list: List[float] = []
 	target_year_list: List[int] = []
 
@@ -168,7 +167,7 @@ def make_windows(df: pd.DataFrame, cfg: BuildConfig) -> Dict[str, np.ndarray]:
 			lag_res_list.append(lag_res_seq)
 			province_list.append(int(target_row["province_id"]))
 			target_res_list.append(float(target_row["residual"]))
-			target_log_co2_list.append(float(target_row["log_CO2"]))
+			target_log_energy_list.append(float(target_row["log_Energy"]))
 			target_stirpat_log_list.append(float(target_row["stirpat_log_pred"]))
 			target_year_list.append(int(target_row["year"]))
 
@@ -182,7 +181,7 @@ def make_windows(df: pd.DataFrame, cfg: BuildConfig) -> Dict[str, np.ndarray]:
 		"lag_residual_x": np.stack(lag_res_list, axis=0),
 		"province_idx": np.asarray(province_list, dtype=np.int64),
 		"target_residual": np.asarray(target_res_list, dtype=np.float32),
-		"target_log_co2": np.asarray(target_log_co2_list, dtype=np.float32),
+		"target_log_energy": np.asarray(target_log_energy_list, dtype=np.float32),
 		"target_stirpat_log": np.asarray(target_stirpat_log_list, dtype=np.float32),
 		"target_year": np.asarray(target_year_list, dtype=np.int32),
 		"gru_feature_names": np.asarray(gru_cols, dtype=object),
@@ -205,7 +204,7 @@ def split_and_save(pack: Dict[str, np.ndarray], cfg: BuildConfig) -> None:
 			"lag_residual_x",
 			"province_idx",
 			"target_residual",
-			"target_log_co2",
+			"target_log_energy",
 			"target_stirpat_log",
 			"target_year",
 		]:

@@ -6,12 +6,25 @@
   "co2_source_counts": {
     "MEIC_1990_2023": 1020
   },
+  "lmdi_residual_abs_ratio_stats": {
+    "mean": 2.210850665733381e-14,
+    "median": 4.37448192388653e-15,
+    "p90": 3.2408896157779686e-14,
+    "max": 5.773159728050595e-12
+  },
   "missing_ratio": {
     "CO2": 0.0,
     "GDP": 0.0,
     "Population": 0.0,
     "Energy": 0.0,
+    "CoalTCE": 0.0,
+    "OilTCE": 0.0,
+    "GasTCE": 0.0,
+    "NonFossilTCE": 0.0,
     "CoalShare": 0.0,
+    "OilShare": 0.0,
+    "GasShare": 0.0,
+    "NonFossilShare": 0.0,
     "Industry": 0.0,
     "Urbanization": 0.0,
     "HighwayMileage": 0.0,
@@ -37,6 +50,21 @@
     "Provincial_coal_share_logit_polynomial_fit": 240,
     "Provincial_coal_share_logit_interpolation": 4
   },
+  "oil_share_source_counts": {
+    "Provincial_oil_share_from_total_final_consumption_tce_converted": 776,
+    "Provincial_oil_share_logit_polynomial_fit": 240,
+    "Provincial_oil_share_logit_interpolation": 4
+  },
+  "gas_share_source_counts": {
+    "Provincial_gas_share_from_total_final_consumption_tce_converted": 724,
+    "Provincial_gas_share_logit_polynomial_fit": 290,
+    "Provincial_gas_share_logit_interpolation": 6
+  },
+  "nonfossil_share_source_counts": {
+    "Provincial_nonfossil_share_from_total_final_consumption_tce_converted": 775,
+    "Provincial_nonfossil_share_logit_polynomial_fit": 240,
+    "Provincial_nonfossil_share_logit_interpolation": 5
+  },
   "industry_source_counts": {
     "Provincial_industry_share_1996_2024_observed": 809,
     "Provincial_industry_logit_polynomial_fit": 211
@@ -53,10 +81,20 @@
     "Provincial_civil_car_1990_2024_used_as_private_cars_proxy": 1015,
     "Provincial_private_cars_log_polynomial_fit": 5
   },
+  "national_energy_validation_stats": {
+    "overlap_year_count": 34,
+    "overlap_year_min": 1990,
+    "overlap_year_max": 2023,
+    "corr": 0.9932234080312539,
+    "mape": 0.3360392360166963,
+    "mean_ratio_actual_over_province_sum": 1.591203046545429
+  },
   "notes": [
     "CO2 uses MEIC provincial total emissions only (1990-2023).",
+    "LMDI uses the four-factor Kaya identity: CO2 = Population * A * B * C.",
     "Energy is aggregated after converting fuel-specific total final consumption into standard coal equivalent (tce).",
-    "CoalShare is defined as coal-group tce divided by total final consumption tce.",
+    "Coal/Oil/Gas/NonFossil shares are defined as grouped tce divided by total final consumption tce.",
+    "National energy total series is used for macro validation only and is not used as provincial fill value.",
     "All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
     "No national fallback is used in this build.",
     "HighwayMileage and PrivateCars are integrated from provincial transport dataset.",

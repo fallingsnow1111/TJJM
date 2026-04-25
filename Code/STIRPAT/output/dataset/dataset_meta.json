@@ -15,8 +15,7 @@
     "log_pGDP",
     "Industry",
     "Urbanization",
-    "CoalShare",
-    "log_CarbonIntensity",
+    "EnergyIntensity",
     "log_PrivateCars"
   ],
   "num_provinces": 30,

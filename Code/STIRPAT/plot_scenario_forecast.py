@@ -37,6 +37,8 @@ def _pretty_name(s: str) -> str:
         "baseline": "Baseline",
         "low_carbon": "Low-carbon",
         "extensive": "Extensive",
+        "green_growth": "Green Growth",
+        "deep_decarb": "Deep Decarb",
     }
     return mapping.get(s, s)
 
@@ -46,6 +48,8 @@ def plot_trend_with_peak(national_df: pd.DataFrame, peak_df: pd.DataFrame, out_f
         "baseline": {"color": "#1f77b4", "ls": "-", "marker": "o"},
         "low_carbon": {"color": "#2ca02c", "ls": "--", "marker": "s"},
         "extensive": {"color": "#d62728", "ls": "-.", "marker": "^"},
+        "green_growth": {"color": "#9467bd", "ls": "-", "marker": "D"},
+        "deep_decarb": {"color": "#8c564b", "ls": "--", "marker": "x"},
     }
 
     fig, ax = plt.subplots(figsize=(12, 6.5))
@@ -69,8 +73,9 @@ def plot_trend_with_peak(national_df: pd.DataFrame, peak_df: pd.DataFrame, out_f
             py = int(one_peak.iloc[0]["peak_year"])
             pv = float(one_peak.iloc[0]["peak_co2"])
             ax.scatter([py], [pv], color=st["color"], s=75, zorder=4)
+            note = "未达峰" if py == 2035 else f"{py}: {pv:.1f}"
             ax.annotate(
-                f"{_pretty_name(scenario)} peak\n{py}: {pv:.1f}",
+                f"{_pretty_name(scenario)} peak\n{note}",
                 xy=(py, pv),
                 xytext=(8, 10),
                 textcoords="offset points",
@@ -95,29 +100,39 @@ def plot_key_years(national_df: pd.DataFrame, out_file: Path) -> None:
     if df.empty:
         return
 
-    scenario_order = ["low_carbon", "baseline", "extensive"]
-    year_labels = [str(y) for y in years]
-    x = np.arange(len(years))
-    width = 0.24
-
-    fig, ax = plt.subplots(figsize=(10.5, 6.2))
-
+    # 定义所有情景及其展示顺序
+    scenario_order = ["deep_decarb", "low_carbon", "green_growth", "baseline", "extensive"]
     colors = {
+        "deep_decarb": "#8c564b",
         "low_carbon": "#2ca02c",
+        "green_growth": "#9467bd",
         "baseline": "#1f77b4",
         "extensive": "#d62728",
     }
+
+    year_labels = [str(y) for y in years]
+    x = np.arange(len(years))
+    n_scenarios = len(scenario_order)
+    width = 0.8 / n_scenarios   # 自动计算柱宽，避免重叠
+
+    fig, ax = plt.subplots(figsize=(12, 6.5))
 
     for i, scenario in enumerate(scenario_order):
         vals = []
         for y in years:
             row = df[(df["scenario"] == scenario) & (df["year"] == y)]
             vals.append(float(row.iloc[0]["co2_pred"]) if not row.empty else np.nan)
-        bars = ax.bar(x + (i - 1) * width, vals, width=width, color=colors[scenario], label=_pretty_name(scenario))
+        bars = ax.bar(
+            x + (i - (n_scenarios - 1) / 2) * width,
+            vals,
+            width=width,
+            color=colors[scenario],
+            label=_pretty_name(scenario),
+        )
         for b in bars:
             h = b.get_height()
             if np.isfinite(h):
-                ax.text(b.get_x() + b.get_width() / 2, h, f"{h:.0f}", ha="center", va="bottom", fontsize=8)
+                ax.text(b.get_x() + b.get_width() / 2, h, f"{h:.0f}", ha="center", va="bottom", fontsize=7)
 
     ax.set_title("Scenario Comparison at Key Years", fontsize=14)
     ax.set_xlabel("Year")
@@ -130,7 +145,6 @@ def plot_key_years(national_df: pd.DataFrame, out_file: Path) -> None:
     fig.tight_layout()
     fig.savefig(out_file, dpi=300)
     plt.close(fig)
-
 
 def main() -> None:
     args = build_parser().parse_args()

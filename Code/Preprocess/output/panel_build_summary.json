@@ -7,9 +7,9 @@
     "MEIC_1990_2023": 1020
   },
   "lmdi_residual_abs_ratio_stats": {
-    "mean": 2.210850665733381e-14,
-    "median": 4.37448192388653e-15,
-    "p90": 3.2408896157779686e-14,
+    "mean": 2.200349888855916e-14,
+    "median": 4.488304428798539e-15,
+    "p90": 3.3346751415582365e-14,
     "max": 5.773159728050595e-12
   },
   "missing_ratio": {
@@ -85,9 +85,9 @@
     "overlap_year_count": 34,
     "overlap_year_min": 1990,
     "overlap_year_max": 2023,
-    "corr": 0.9932234080312539,
-    "mape": 0.3360392360166963,
-    "mean_ratio_actual_over_province_sum": 1.591203046545429
+    "corr": 0.9932234080311768,
+    "mape": 0.3360392360168548,
+    "mean_ratio_actual_over_province_sum": 1.591203046546195
   },
   "notes": [
     "CO2 uses MEIC provincial total emissions only (1990-2023).",

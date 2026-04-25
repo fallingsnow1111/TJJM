@@ -15,30 +15,215 @@
   "energy_calibration": {
     "enabled": true,
     "window": 5,
-    "factor": 1.3921090607444497,
+    "factor": 1.3921090607450317,
     "year_min": 2019,
     "year_max": 2023,
     "sample_count": 5
   },
+  "constraint_report": {
+    "baseline": [],
+    "low_carbon": [
+      "low_carbon: peak year 2025 out of [2026, 2028]"
+    ],
+    "extensive": [
+      "extensive: NonFossilShare below target in 2032 (target=27.00)",
+      "extensive: NonFossilShare below target in 2033 (target=28.00)",
+      "extensive: NonFossilShare below target in 2034 (target=29.00)",
+      "extensive: NonFossilShare below target in 2035 (target=30.00)"
+    ],
+    "green_growth": [
+      "green_growth: peak year 2028 out of [2029, 2031]",
+      "green_growth: g_CO2 >= 0 after peak in 2030"
+    ],
+    "deep_decarb": []
+  },
+  "calibration_meta": {
+    "baseline": {
+      "iterations": 4,
+      "peak_year": 2028,
+      "t_start": 2029,
+      "violations": [],
+      "history": [
+        {
+          "iter": 1,
+          "peak_year": 2026,
+          "t_start": 2026,
+          "violations": 2
+        },
+        {
+          "iter": 2,
+          "peak_year": 2027,
+          "t_start": 2027,
+          "violations": 2
+        },
+        {
+          "iter": 3,
+          "peak_year": 2027,
+          "t_start": 2028,
+          "violations": 1
+        },
+        {
+          "iter": 4,
+          "peak_year": 2028,
+          "t_start": 2029,
+          "violations": 0
+        }
+      ],
+      "t_start_final": 2029
+    },
+    "low_carbon": {
+      "iterations": 8,
+      "peak_year": 2025,
+      "t_start": 2030,
+      "violations": [
+        "low_carbon: peak year 2025 out of [2026, 2028]"
+      ],
+      "history": [
+        {
+          "iter": 1,
+          "peak_year": 2024,
+          "t_start": 2025,
+          "violations": 1
+        },
+        {
+          "iter": 2,
+          "peak_year": 2025,
+          "t_start": 2026,
+          "violations": 1
+        },
+        {
+          "iter": 3,
+          "peak_year": 2025,
+          "t_start": 2027,
+          "violations": 1
+        },
+        {
+          "iter": 4,
+          "peak_year": 2025,
+          "t_start": 2028,
+          "violations": 1
+        },
+        {
+          "iter": 5,
+          "peak_year": 2025,
+          "t_start": 2029,
+          "violations": 1
+        },
+        {
+          "iter": 6,
+          "peak_year": 2025,
+          "t_start": 2030,
+          "violations": 1
+        },
+        {
+          "iter": 7,
+          "peak_year": 2025,
+          "t_start": 2030,
+          "violations": 1
+        },
+        {
+          "iter": 8,
+          "peak_year": 2025,
+          "t_start": 2030,
+          "violations": 1
+        }
+      ],
+      "t_start_final": 2030
+    },
+    "green_growth": {
+      "iterations": 8,
+      "peak_year": 2028,
+      "t_start": 2033,
+      "violations": [
+        "green_growth: peak year 2028 out of [2029, 2031]",
+        "green_growth: g_CO2 >= 0 after peak in 2030"
+      ],
+      "history": [
+        {
+          "iter": 1,
+          "peak_year": 2026,
+          "t_start": 2027,
+          "violations": 1
+        },
+        {
+          "iter": 2,
+          "peak_year": 2027,
+          "t_start": 2028,
+          "violations": 1
+        },
+        {
+          "iter": 3,
+          "peak_year": 2028,
+          "t_start": 2029,
+          "violations": 1
+        },
+        {
+          "iter": 4,
+          "peak_year": 2028,
+          "t_start": 2030,
+          "violations": 1
+        },
+        {
+          "iter": 5,
+          "peak_year": 2028,
+          "t_start": 2031,
+          "violations": 2
+        },
+        {
+          "iter": 6,
+          "peak_year": 2028,
+          "t_start": 2032,
+          "violations": 2
+        },
+        {
+          "iter": 7,
+          "peak_year": 2028,
+          "t_start": 2033,
+          "violations": 2
+        },
+        {
+          "iter": 8,
+          "peak_year": 2028,
+          "t_start": 2033,
+          "violations": 2
+        }
+      ],
+      "t_start_final": 2033
+    }
+  },
   "scenarios": [
     {
       "scenario": "baseline",
-      "peak_year": 2035,
-      "peak_co2": 791008.9205083774,
-      "peaked_within_horizon": false,
-      "note": "未在预测期内达峰"
+      "peak_year": 2028,
+      "peak_co2": 819190.0380906856,
+      "peaked_within_horizon": true,
+      "note": "已达峰"
+    },
+    {
+      "scenario": "deep_decarb",
+      "peak_year": 2024,
+      "peak_co2": 774602.7143838677,
+      "peaked_within_horizon": true,
+      "note": "已达峰"
     },
     {
       "scenario": "extensive",
       "peak_year": 2035,
-      "peak_co2": 933700.7319886643,
+      "peak_co2": 870130.7571727529,
       "peaked_within_horizon": false,
       "note": "未在预测期内达峰"
     },
     {
+      "scenario": "green_growth",
+      "peak_year": 2028,
+      "peak_co2": 793536.9517180478,
+      "peaked_within_horizon": true,
+      "note": "已达峰"
+    },
+    {
       "scenario": "low_carbon",
-      "peak_year": 2024,
-      "peak_co2": 748308.0551465299,
+      "peak_year": 2025,
+      "peak_co2": 791380.1873758542,
       "peaked_within_horizon": true,
       "note": "已达峰"
     }

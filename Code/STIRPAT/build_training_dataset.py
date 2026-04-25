@@ -83,6 +83,7 @@ def prepare_dataframe(input_csv: Path) -> pd.DataFrame:
 	# Feature engineering aligned to STIRPAT guidance.
 	df["pGDP"] = df["GDP"] / df["Population"]
 	df["CarbonIntensity"] = df["CO2"] / df["GDP"]
+	df["EnergyIntensity"] = df["Energy"] / df["GDP"]
 
 	for col in ["CO2", "GDP", "Population", "Energy", "PrivateCars", "pGDP", "CarbonIntensity"]:
 		df[f"log_{col}"] = np.log(df[col].clip(lower=1e-8))
@@ -101,14 +102,14 @@ def build_residual_target(
 ) -> tuple[pd.DataFrame, List[str]]:
 	"""拟合 STIRPAT 面板岭回归并生成残差目标。"""
 	stirpat_cols = [
-		"log_Population",
-		"log_pGDP",
-		"Industry",
-		"Urbanization",
-		"CoalShare",
-		"log_CarbonIntensity",
-		"log_PrivateCars",
+    "log_Population",
+    "log_pGDP",
+    "Industry",
+    "Urbanization",
+    "EnergyIntensity",    # 新：替代 CoalShare
+    "log_PrivateCars",
 	]
+	# 注意：删除了 CoalShare 和 log_CarbonIntensity
 
 	model = PanelRidgeSTIRPAT(alpha=ridge_alpha)
 	train_mask = df["year"] <= train_end_year
@@ -123,17 +124,17 @@ def build_residual_target(
 def make_windows(df: pd.DataFrame, cfg: BuildConfig) -> Dict[str, np.ndarray]:
 	"""将面板数据重构为滑动窗口三维张量。"""
 	gru_cols = [
-		"log_GDP",
-		"log_pGDP",
-		"log_Population",
-		"Energy",
-		"CoalShare",
-		"Industry",
-		"Urbanization",
-		"HighwayMileage",
-		"log_PrivateCars",
-		"log_CarbonIntensity",
+    "log_GDP",
+    "log_pGDP",
+    "log_Population",
+    "Energy",
+    "EnergyIntensity",   # 替换原来的 CoalShare
+    "Industry",
+    "Urbanization",
+    "HighwayMileage",
+    "log_PrivateCars",
 	]
+	# 注意：删除了 log_CarbonIntensity，因为没有 CarbonIntensity 了
 
 	standardizer = Standardizer()
 	train_rows = df[df["year"] <= cfg.train_end_year]

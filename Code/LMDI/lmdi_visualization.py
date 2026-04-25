@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LMDI_OUTPUT_DIR = ROOT / "Code" / "LMDI" / "output"
 FIGURE_DIR = LMDI_OUTPUT_DIR / "figures"
 LMDI_PATH = LMDI_OUTPUT_DIR / "lmdi_decomposition.csv"
-PANEL_PATH = ROOT / "Code" / "Dataset" / "output" / "panel_with_residual.csv"
+PANEL_PATH = ROOT / "Code" / "STIRPAT" / "output" / "dataset" /"panel_with_residual.csv"
 
 FACTOR_ORDER = ["delta_P", "delta_A", "delta_B", "delta_C"]
 FACTOR_LABELS = {

@@ -15,7 +15,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 LMDI_OUTPUT_DIR = ROOT / "Code" / "LMDI" / "output"
-PANEL_PATH = ROOT / "Code" / "Dataset" / "output" / "panel_with_residual.csv"
+PANEL_PATH = ROOT / "Code" / "STIRPAT" / "output" / "dataset" /"panel_with_residual.csv"
 LMDI_PATH = LMDI_OUTPUT_DIR / "lmdi_decomposition.csv"
 SUMMARY_PATH = LMDI_OUTPUT_DIR / "lmdi_robustness_summary.md"
 

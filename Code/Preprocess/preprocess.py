@@ -1431,30 +1431,15 @@ def main() -> None:
 	panel["A"] = panel["GDP"] / panel["Population"]
 	panel["B"] = panel["Energy"] / panel["GDP"]
 	panel["C"] = panel["CO2"] / panel["Energy"]
+	panel["EnergyIntensity"] = panel["Energy"] / panel["GDP"]
 
 	core_cols = [
-		"province",
-		"year",
-		"CO2",
-		"GDP",
-		"Population",
-		"Energy",
-		"CoalTCE",
-		"OilTCE",
-		"GasTCE",
-		"NonFossilTCE",
-		"CoalShare",
-		"OilShare",
-		"GasShare",
-		"NonFossilShare",
-		"Industry",
-		"Urbanization",
-		"HighwayMileage",
-		"PrivateCars",
-		"A",
-		"B",
-		"C",
-		"CO2_source",
+    "province", "year", "CO2", "GDP", "Population", "Energy",
+    "CoalTCE", "OilTCE", "GasTCE", "NonFossilTCE",
+    "CoalShare", "OilShare", "GasShare", "NonFossilShare",
+    "Industry", "Urbanization", "HighwayMileage", "PrivateCars",
+    "A", "B", "C", "EnergyIntensity",   # ← 加上它
+    "CO2_source",
 	]
 	panel_core = cast(pd.DataFrame, panel.loc[:, [c for c in core_cols if c in panel.columns]].copy())
 

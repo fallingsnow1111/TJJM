@@ -83,81 +83,82 @@ def _predict_residual(
 			preds.append(pred)
 	return np.concatenate(preds, axis=0)
 
-
 def evaluate_split(
-	split: str,
-	npz_data: Any,
-	model: EntityEmbeddingGRU,
-	device: torch.device,
-	batch_size: int,
-	output_detail_dir: Path,
+    split: str,
+    npz_data: Any,
+    model: EntityEmbeddingGRU,
+    device: torch.device,
+    batch_size: int,
+    output_detail_dir: Path,
 ) -> Dict[str, Dict[str, float]]:
-	"""评估单个切分：比较 STIRPAT 基线与融合重构结果。"""
-	required_keys = [
-		f"{split}_dynamic_x",
-		f"{split}_lag_residual_x",
-		f"{split}_province_idx",
-		f"{split}_target_log_co2",
-		f"{split}_target_stirpat_log",
-		f"{split}_target_year",
-	]
-	for k in required_keys:
-		if k not in npz_data:
-			raise KeyError(f"Missing key in dataset npz: {k}")
+    """评估单个切分：比较 STIRPAT 基线与融合重构的能源消费结果。"""
+    required_keys = [
+        f"{split}_dynamic_x",
+        f"{split}_lag_residual_x",
+        f"{split}_province_idx",
+        f"{split}_target_log_energy",          # 改
+        f"{split}_target_stirpat_log",
+        f"{split}_target_year",
+    ]
+    for k in required_keys:
+        if k not in npz_data:
+            raise KeyError(f"Missing key in dataset npz: {k}")
 
-	dynamic_x = npz_data[f"{split}_dynamic_x"]
-	lag_residual_x = npz_data[f"{split}_lag_residual_x"]
-	province_idx = npz_data[f"{split}_province_idx"]
-	true_log = npz_data[f"{split}_target_log_co2"]
-	stirpat_log = npz_data[f"{split}_target_stirpat_log"]
-	years = npz_data[f"{split}_target_year"]
+    dynamic_x = npz_data[f"{split}_dynamic_x"]
+    lag_residual_x = npz_data[f"{split}_lag_residual_x"]
+    province_idx = npz_data[f"{split}_province_idx"]
+    true_log_energy = npz_data[f"{split}_target_log_energy"]   # 改
+    stirpat_log_energy = npz_data[f"{split}_target_stirpat_log"]  # 实际是 log_Energy 的 STIRPAT 预测
+    years = npz_data[f"{split}_target_year"]
 
-	pred_residual = _predict_residual(
-		model=model,
-		dynamic_x=dynamic_x,
-		lag_residual_x=lag_residual_x,
-		province_idx=province_idx,
-		device=device,
-		batch_size=batch_size,
-	)
+    pred_residual = _predict_residual(
+        model=model,
+        dynamic_x=dynamic_x,
+        lag_residual_x=lag_residual_x,
+        province_idx=province_idx,
+        device=device,
+        batch_size=batch_size,
+    )
 
-	hybrid_log = stirpat_log + pred_residual
+    hybrid_log_energy = stirpat_log_energy + pred_residual
 
-	true_co2 = np.exp(true_log)
-	stirpat_co2 = np.exp(stirpat_log)
-	hybrid_co2 = np.exp(hybrid_log)
+    # 转换到能源消费总量（亿吨标准煤等原始单位）
+    true_energy = np.exp(true_log_energy)
+    stirpat_energy = np.exp(stirpat_log_energy)
+    hybrid_energy = np.exp(hybrid_log_energy)
 
-	metrics = {
-		"stirpat_only": _reg_metrics(true_co2, stirpat_co2),
-		"hybrid_reconstruct": _reg_metrics(true_co2, hybrid_co2),
-	}
+    metrics = {
+        "stirpat_only": _reg_metrics(true_energy, stirpat_energy),
+        "hybrid_reconstruct": _reg_metrics(true_energy, hybrid_energy),
+    }
 
-	output_detail_dir.mkdir(parents=True, exist_ok=True)
-	detail_df = pd.DataFrame(
-		{
-			"split": split,
-			"year": years.astype(int),
-			"province_idx": province_idx.astype(int),
-			"true_log_co2": true_log,
-			"stirpat_log_pred": stirpat_log,
-			"residual_pred": pred_residual,
-			"hybrid_log_pred": hybrid_log,
-			"true_co2": true_co2,
-			"stirpat_co2_pred": stirpat_co2,
-			"hybrid_co2_pred": hybrid_co2,
-		}
-	)
-	detail_df["stirpat_abs_pct_err"] = np.abs(
-		(detail_df["stirpat_co2_pred"] - detail_df["true_co2"]) / np.maximum(np.abs(detail_df["true_co2"]), 1e-6)
-	)
-	detail_df["hybrid_abs_pct_err"] = np.abs(
-		(detail_df["hybrid_co2_pred"] - detail_df["true_co2"]) / np.maximum(np.abs(detail_df["true_co2"]), 1e-6)
-	)
-	detail_path = output_detail_dir / f"{split}_reconstruction_detail.csv"
-	detail_df.to_csv(detail_path, index=False, encoding="utf-8")
+    output_detail_dir.mkdir(parents=True, exist_ok=True)
+    detail_df = pd.DataFrame(
+        {
+            "split": split,
+            "year": years.astype(int),
+            "province_idx": province_idx.astype(int),
+            "true_log_energy": true_log_energy,
+            "stirpat_log_energy_pred": stirpat_log_energy,
+            "residual_pred": pred_residual,
+            "hybrid_log_energy_pred": hybrid_log_energy,
+            "true_energy": true_energy,
+            "stirpat_energy_pred": stirpat_energy,
+            "hybrid_energy_pred": hybrid_energy,
+        }
+    )
+    detail_df["stirpat_abs_pct_err"] = np.abs(
+        (detail_df["stirpat_energy_pred"] - detail_df["true_energy"])
+        / np.maximum(np.abs(detail_df["true_energy"]), 1e-6)
+    )
+    detail_df["hybrid_abs_pct_err"] = np.abs(
+        (detail_df["hybrid_energy_pred"] - detail_df["true_energy"])
+        / np.maximum(np.abs(detail_df["true_energy"]), 1e-6)
+    )
+    detail_path = output_detail_dir / f"{split}_energy_reconstruction_detail.csv"
+    detail_df.to_csv(detail_path, index=False, encoding="utf-8")
 
-	return metrics
-
+    return metrics
 
 def load_model(cfg: EvalConfig, device: torch.device) -> EntityEmbeddingGRU:
 	"""从训练输出的 checkpoint 还原模型结构和参数。"""
@@ -242,7 +243,7 @@ def main() -> None:
 	cfg.output_json.parent.mkdir(parents=True, exist_ok=True)
 	cfg.output_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-	print("=== Reconstruction Metrics (CO2 scale) ===")
+	print("=== Reconstruction Metrics (Energy scale) ===")
 	for split, split_metric in all_metrics.items():
 		base = split_metric["stirpat_only"]
 		hybrid = split_metric["hybrid_reconstruct"]

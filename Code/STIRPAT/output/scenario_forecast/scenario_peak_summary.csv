@@ -1,0 +1,4 @@
+scenario,peak_year,peak_co2,peaked_within_horizon,note
+baseline,2035,13514.437771584691,False,未在预测期内达峰
+extensive,2035,14321.157655592295,False,未在预测期内达峰
+low_carbon,2035,12753.5228816033,False,未在预测期内达峰

@@ -1,0 +1,36 @@
+{
+  "config": {
+    "panel_csv": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\Preprocess\\output\\panel_master.csv",
+    "panel_with_residual_csv": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\dataset\\panel_with_residual.csv",
+    "dataset_npz": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\dataset\\stirpat_ee_gru_dataset.npz",
+    "model_ckpt": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\model\\best_ee_gru.pt",
+    "output_dir": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast",
+    "start_year": 2024,
+    "end_year": 2035,
+    "window": 3,
+    "train_end_year": 2020
+  },
+  "scenarios": [
+    {
+      "scenario": "baseline",
+      "peak_year": 2035,
+      "peak_co2": 13514.437771584691,
+      "peaked_within_horizon": false,
+      "note": "未在预测期内达峰"
+    },
+    {
+      "scenario": "extensive",
+      "peak_year": 2035,
+      "peak_co2": 14321.157655592295,
+      "peaked_within_horizon": false,
+      "note": "未在预测期内达峰"
+    },
+    {
+      "scenario": "low_carbon",
+      "peak_year": 2035,
+      "peak_co2": 12753.5228816033,
+      "peaked_within_horizon": false,
+      "note": "未在预测期内达峰"
+    }
+  ]
+}

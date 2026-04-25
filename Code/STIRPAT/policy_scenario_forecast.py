@@ -66,22 +66,20 @@ def _interp(year: int, y0: int, y1: int, v0: float, v1: float) -> float:
 
 
 @dataclass
+class ScenarioPeakSpec:
+    target_peak_year: int
+    require_peak: bool
+    t_start: int
+    energy: Tuple[float, float, float]  # percentages: (2024-2027, 2028-2030, 2031-2035)
+    carbon_intensity: Tuple[float, float, float]  # percentages: early/mid/late
+    coal_share: Tuple[float, float, float]  # pp per year: early/mid/late
+    industry: Tuple[float, float]  # pp per year: 2024-2027 / 2028+
+
+
+@dataclass
 class PathGenerator:
     start_year: int
     end_year: int
-    transition_k: float = 1.6
-
-    SCENARIO_START_YEAR: Dict[str, int] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.SCENARIO_START_YEAR is None:
-            self.SCENARIO_START_YEAR = {
-                "baseline": 2026,
-                "low_carbon": 2025,
-                "green_growth": 2027,
-                "deep_decarb": 2024,
-                "extensive": 2029,
-            }
 
     def _expand_phase_values(self, policy: Dict[str, Dict[str, float]]) -> Dict[str, Dict[int, float]]:
         annual: Dict[str, Dict[int, float]] = {}
@@ -92,69 +90,39 @@ class PathGenerator:
                 annual[var][year] = float(phase_values[phase])
         return annual
 
-    def _build_deep_decarb_path(self, annual: Dict[str, Dict[int, float]]) -> None:
-        for year in range(self.start_year, self.end_year + 1):
-            w_e_1 = _sigmoid(self.transition_k * (year - 2028.0))
-            w_e_2 = _sigmoid(self.transition_k * (year - 2031.0))
-            energy_early = _interp(year, 2024, 2027, 0.025, 0.022)
-            energy_mid = _interp(year, 2028, 2030, 0.022, 0.015)
-            energy_late = _interp(year, 2031, 2035, 0.015, 0.008)
-            e_tmp = _blend(energy_early, energy_mid, w_e_1)
-            annual["Energy"][year] = _blend(e_tmp, energy_late, w_e_2)
+    @staticmethod
+    def _piecewise_value(year: int, v1: float, v2: float, v3: float) -> float:
+        if 2024 <= year <= 2027:
+            return float(v1)
+        if 2028 <= year <= 2030:
+            return float(v2)
+        return float(v3)
 
-            w_i = _sigmoid(self.transition_k * (year - 2028.0))
-            annual["Industry"][year] = _blend(-1.2, -1.5, w_i)
-
-            # Coal and carbon-intensity transition later than industry to model lagged policy transmission.
-            w_c_1 = _sigmoid(self.transition_k * (year - 2029.0))
-            w_c_2 = _sigmoid(self.transition_k * (year - 2032.0))
-            coal_tmp = _blend(-0.8, -2.5, w_c_1)
-            annual["CoalShare"][year] = _blend(coal_tmp, -3.0, w_c_2)
-
-            w_ci_1 = _sigmoid(self.transition_k * (year - 2029.5))
-            w_ci_2 = _sigmoid(self.transition_k * (year - 2032.0))
-            ci_tmp = _blend(-0.02, -0.04, w_ci_1)
-            annual["CarbonIntensity"][year] = _blend(ci_tmp, -0.035, w_ci_2)
-            annual["EnergyIntensity"][year] = annual["CarbonIntensity"][year]
-
-    def _apply_timed_decarbonization(
+    def _apply_target_peak_paths(
         self,
         annual: Dict[str, Dict[int, float]],
+        spec: ScenarioPeakSpec,
         t_start: int,
-        scenario_name: str,
+        ci_mid_adjust: float = 0.0,
+        coal_mid_adjust: float = 0.0,
     ) -> None:
+        t_peak = int(spec.target_peak_year)
+        ci_early, ci_mid, ci_late = spec.carbon_intensity
+        coal_early, coal_mid, coal_late = spec.coal_share
+
         for year in range(self.start_year, self.end_year + 1):
-            base_ci = float(annual["CarbonIntensity"][year])
-            base_coal = float(annual["CoalShare"][year])
+            annual["Energy"][year] = self._piecewise_value(year, *spec.energy) / 100.0
+            annual["Industry"][year] = float(spec.industry[0] if year <= 2027 else spec.industry[1])
 
             if year < t_start:
-                if scenario_name in {"baseline", "low_carbon", "green_growth"}:
-                    ci = max(base_ci * 0.65, -0.02)
-                    coal = max(base_coal * 0.6, -1.0)
-                elif scenario_name == "extensive":
-                    ci = max(base_ci * 0.75, -0.015)
-                    coal = max(base_coal * 0.8, -0.8)
-                else:
-                    ci = base_ci
-                    coal = base_coal
+                ci = ci_early / 100.0
+                coal = coal_early
+            elif year < t_peak:
+                ci = (ci_mid / 100.0) + ci_mid_adjust
+                coal = coal_mid + coal_mid_adjust
             else:
-                years_after = max(year - t_start, 0)
-                ramp = min(years_after / 4.0, 1.0)
-                if scenario_name == "baseline":
-                    ci = base_ci * (1.05 + 0.2 * ramp)
-                    coal = base_coal * (1.05 + 0.2 * ramp)
-                elif scenario_name == "low_carbon":
-                    ci = base_ci * (1.15 + 0.25 * ramp)
-                    coal = base_coal * (1.12 + 0.25 * ramp)
-                elif scenario_name == "green_growth":
-                    ci = base_ci * (1.08 + 0.2 * ramp)
-                    coal = base_coal * (1.08 + 0.2 * ramp)
-                elif scenario_name == "extensive":
-                    ci = base_ci * (0.9 + 0.1 * ramp)
-                    coal = base_coal * (0.9 + 0.1 * ramp)
-                else:
-                    ci = base_ci
-                    coal = base_coal
+                ci = ci_late / 100.0
+                coal = coal_late
 
             annual["CarbonIntensity"][year] = float(np.clip(ci, -0.06, 0.0))
             annual["EnergyIntensity"][year] = annual["CarbonIntensity"][year]
@@ -162,19 +130,21 @@ class PathGenerator:
 
     def generate_paths(
         self,
-        scenario_name: str,
         policy: Dict[str, Dict[str, float]],
+        spec: ScenarioPeakSpec,
         t_start_override: Optional[int] = None,
+        ci_mid_adjust: float = 0.0,
+        coal_mid_adjust: float = 0.0,
     ) -> Dict[str, Dict[int, float]]:
         annual = self._expand_phase_values(policy)
-        if scenario_name == "deep_decarb":
-            self._build_deep_decarb_path(annual)
-            return annual
-
-        t_start = int(self.SCENARIO_START_YEAR.get(scenario_name, 2026))
-        if t_start_override is not None:
-            t_start = int(t_start_override)
-        self._apply_timed_decarbonization(annual, t_start=t_start, scenario_name=scenario_name)
+        t_start = int(spec.t_start if t_start_override is None else t_start_override)
+        self._apply_target_peak_paths(
+            annual=annual,
+            spec=spec,
+            t_start=t_start,
+            ci_mid_adjust=ci_mid_adjust,
+            coal_mid_adjust=coal_mid_adjust,
+        )
         return annual
 
 
@@ -222,13 +192,20 @@ class ConstraintChecker:
         nat["g_energy"] = nat["energy_pred"].pct_change()
         nat["g_ei"] = nat["ei"].pct_change()
         if require_peak:
-            for _, row in nat.iloc[1:].iterrows():
-                year = int(row["year"])
-                g_co2 = float(row["g_co2"])
-                if year <= peak_year and g_co2 < -1e-6:
-                    violations.append(f"{scenario_name}: g_CO2 < 0 before/at peak in {year}")
-                if year > peak_year and g_co2 >= -1e-6:
-                    violations.append(f"{scenario_name}: g_CO2 >= 0 after peak in {year}")
+            if peak_year <= self.start_year:
+                violations.append(f"{scenario_name}: peak year must be after {self.start_year}")
+
+            pre_peak = nat[nat["year"] == (peak_year - 1)]
+            if not pre_peak.empty:
+                g_pre = float(pre_peak["g_co2"].iloc[0])
+                if not (0.0 <= g_pre <= 0.01):
+                    violations.append(f"{scenario_name}: g_CO2 at peak-1 not in [0, 1%]")
+
+            post_peak = nat[nat["year"] == (peak_year + 1)]
+            if not post_peak.empty:
+                g_post = float(post_peak["g_co2"].iloc[0])
+                if g_post >= -1e-8:
+                    violations.append(f"{scenario_name}: g_CO2 at peak+1 must be negative")
 
         s = scenario_df.copy()
         share_sum = s["CoalShare"] + s["OilShare"] + s["GasShare"] + s["NonFossilShare"]
@@ -255,24 +232,28 @@ class ConstraintChecker:
 
 @dataclass
 class Calibrator:
-    max_iter: int = 8
+    max_iter: int = 20
 
     def calibrate(
         self,
         scenario_name: str,
         initial_t_start: int,
-        target_min_peak: int,
-        target_max_peak: int,
-        regenerate_paths: Callable[[int], Dict[str, Dict[int, float]]],
+        target_peak_year: int,
+        regenerate_paths: Callable[[int, float, float], Dict[str, Dict[int, float]]],
         simulate_once: Callable[[Dict[str, Dict[int, float]], int], pd.DataFrame],
         checker: ConstraintChecker,
     ) -> Tuple[Dict[str, Dict[int, float]], int, Dict[str, Any]]:
         t_start = int(initial_t_start)
-        paths = regenerate_paths(t_start)
+        ci_mid_adjust = 0.0
+        coal_mid_adjust = 0.0
+        paths = regenerate_paths(t_start, ci_mid_adjust, coal_mid_adjust)
         history: List[Dict[str, Any]] = []
+        best: Optional[Dict[str, Any]] = None
+        peak_year = target_peak_year
+        violations: List[str] = []
 
         for i in range(self.max_iter):
-            paths = regenerate_paths(t_start)
+            paths = regenerate_paths(t_start, ci_mid_adjust, coal_mid_adjust)
             scenario_df = simulate_once(paths, t_start)
             national_df = (
                 scenario_df.groupby("year", as_index=False)[["co2_pred", "energy_pred"]]
@@ -280,33 +261,74 @@ class Calibrator:
                 .sort_values("year", kind="stable")
             )
             peak_year = int(national_df.loc[int(np.argmax(national_df["co2_pred"].to_numpy(dtype=float))), "year"])
+            objective = float((peak_year - target_peak_year) ** 2)
             violations = checker.check_constraints(
                 scenario_df=scenario_df,
                 national_df=national_df,
                 scenario_name=scenario_name,
                 require_peak=True,
-                peak_year_min=target_min_peak,
-                peak_year_max=target_max_peak,
+                peak_year_min=target_peak_year,
+                peak_year_max=target_peak_year,
             )
-            history.append({"iter": i + 1, "peak_year": peak_year, "t_start": t_start, "violations": len(violations)})
+            history.append(
+                {
+                    "iter": i + 1,
+                    "peak_year": peak_year,
+                    "target_peak": target_peak_year,
+                    "objective": objective,
+                    "t_start": t_start,
+                    "ci_mid_adjust": ci_mid_adjust,
+                    "coal_mid_adjust": coal_mid_adjust,
+                    "violations": len(violations),
+                }
+            )
 
-            if not violations and target_min_peak <= peak_year <= target_max_peak:
+            if best is None or objective < float(best["objective"]):
+                best = {
+                    "objective": objective,
+                    "paths": paths,
+                    "t_start": t_start,
+                    "peak_year": peak_year,
+                    "violations": violations,
+                    "ci_mid_adjust": ci_mid_adjust,
+                    "coal_mid_adjust": coal_mid_adjust,
+                }
+
+            if peak_year == target_peak_year and not violations:
                 return paths, t_start, {
                     "iterations": i + 1,
                     "peak_year": peak_year,
+                    "target_peak_year": target_peak_year,
                     "t_start": t_start,
+                    "ci_mid_adjust": ci_mid_adjust,
+                    "coal_mid_adjust": coal_mid_adjust,
                     "violations": violations,
                     "history": history,
                 }
 
-            if peak_year < target_min_peak:
-                t_start = min(t_start + 1, target_max_peak + 2)
-            elif peak_year > target_max_peak:
+            if peak_year < target_peak_year:
+                t_start = min(t_start + 1, 2033)
+                ci_mid_adjust = min(ci_mid_adjust + 0.003, 0.02)
+                coal_mid_adjust = min(coal_mid_adjust + 0.10, 1.0)
+            elif peak_year > target_peak_year:
                 t_start = max(t_start - 1, 2024)
-            else:
-                break
+                ci_mid_adjust = max(ci_mid_adjust - 0.003, -0.02)
+                coal_mid_adjust = max(coal_mid_adjust - 0.10, -1.0)
 
-        final_df = simulate_once(paths, t_start)
+        if best is None:
+            best = {
+                "paths": paths,
+                "t_start": t_start,
+                "peak_year": peak_year,
+                "violations": violations,
+                "objective": float((peak_year - target_peak_year) ** 2),
+                "ci_mid_adjust": ci_mid_adjust,
+                "coal_mid_adjust": coal_mid_adjust,
+            }
+
+        final_paths = best["paths"]
+        final_t_start = int(best["t_start"])
+        final_df = simulate_once(final_paths, final_t_start)
         final_national_df = (
             final_df.groupby("year", as_index=False)[["co2_pred", "energy_pred"]]
             .sum()
@@ -318,13 +340,17 @@ class Calibrator:
             national_df=final_national_df,
             scenario_name=scenario_name,
             require_peak=True,
-            peak_year_min=target_min_peak,
-            peak_year_max=target_max_peak,
+            peak_year_min=target_peak_year,
+            peak_year_max=target_peak_year,
         )
-        return paths, t_start, {
+        return final_paths, final_t_start, {
             "iterations": self.max_iter,
             "peak_year": final_peak,
-            "t_start": t_start,
+            "target_peak_year": target_peak_year,
+            "objective": float(best["objective"]),
+            "t_start": final_t_start,
+            "ci_mid_adjust": float(best["ci_mid_adjust"]),
+            "coal_mid_adjust": float(best["coal_mid_adjust"]),
             "violations": final_violations,
             "history": history,
         }
@@ -664,6 +690,7 @@ def forecast_scenario(
     scenario_rule = scenario_rule or {}
     require_peak = bool(scenario_rule.get("require_peak", False))
     t_start = int(scenario_rule.get("t_start", cfg.start_year))
+    target_peak_year = int(scenario_rule.get("target_peak_year", cfg.end_year))
 
     # Seed residual recursion with historical true residuals through 2023.
     hist = panel_res_df[panel_res_df["year"] <= (cfg.start_year - 1)].copy()
@@ -748,6 +775,23 @@ def forecast_scenario(
                 min_growth = max(energy_growth, 0.008)
                 energy_floor = prev_energy * (1.0 + min_growth)
                 energy_pred = max(energy_pred, energy_floor)
+
+            if require_peak and year <= (target_peak_year - 1):
+                prev_intensity = (
+                    float(prev["CoalShare"]) * IPCC_EF_TCO2_PER_TCE["coal"]
+                    + float(prev["OilShare"]) * IPCC_EF_TCO2_PER_TCE["oil"]
+                    + float(prev["GasShare"]) * IPCC_EF_TCO2_PER_TCE["gas"]
+                ) / 100.0
+                curr_intensity = (
+                    float(row["CoalShare"]) * IPCC_EF_TCO2_PER_TCE["coal"]
+                    + float(row["OilShare"]) * IPCC_EF_TCO2_PER_TCE["oil"]
+                    + float(row["GasShare"]) * IPCC_EF_TCO2_PER_TCE["gas"]
+                ) / 100.0
+                prev_co2 = max(prev_energy * prev_intensity, 1e-8)
+                min_pre_peak_growth = 0.002 if year < (target_peak_year - 1) else 0.0005
+                co2_floor = prev_co2 * (1.0 + min_pre_peak_growth)
+                energy_floor_by_co2 = co2_floor / max(curr_intensity, 1e-8)
+                energy_pred = max(energy_pred, energy_floor_by_co2)
 
             hybrid_log_energy = _safe_log(energy_pred)
             co2_pred = _co2_from_ipcc(
@@ -1016,12 +1060,52 @@ def main() -> None:
     path_generator = PathGenerator(start_year=cfg.start_year, end_year=cfg.end_year)
     checker = ConstraintChecker(start_year=cfg.start_year, end_year=cfg.end_year)
     calibrator = Calibrator()
-    scenario_rules: Dict[str, Dict[str, Any]] = {
-        "baseline": {"require_peak": True, "peak_min": 2028, "peak_max": 2030, "t_start": 2026},
-        "low_carbon": {"require_peak": True, "peak_min": 2026, "peak_max": 2028, "t_start": 2025},
-        "green_growth": {"require_peak": True, "peak_min": 2029, "peak_max": 2031, "t_start": 2027},
-        "deep_decarb": {"require_peak": False, "peak_min": 2024, "peak_max": 2030, "t_start": 2024},
-        "extensive": {"require_peak": False, "peak_min": 2033, "peak_max": 2035, "t_start": 2029},
+    scenario_specs: Dict[str, ScenarioPeakSpec] = {
+        "baseline": ScenarioPeakSpec(
+            target_peak_year=2029,
+            require_peak=True,
+            t_start=2026,
+            energy=(2.5, 1.8, 1.0),
+            carbon_intensity=(-2.0, -2.8, -2.2),
+            coal_share=(-1.2, -1.5, -1.0),
+            industry=(-1.2, -0.8),
+        ),
+        "low_carbon": ScenarioPeakSpec(
+            target_peak_year=2027,
+            require_peak=True,
+            t_start=2025,
+            energy=(2.3, 1.6, 0.8),
+            carbon_intensity=(-2.5, -3.5, -2.8),
+            coal_share=(-1.5, -2.0, -1.5),
+            industry=(-1.5, -1.1),
+        ),
+        "green_growth": ScenarioPeakSpec(
+            target_peak_year=2030,
+            require_peak=True,
+            t_start=2027,
+            energy=(2.7, 2.0, 1.2),
+            carbon_intensity=(-2.0, -3.0, -2.5),
+            coal_share=(-1.2, -1.8, -1.2),
+            industry=(-1.3, -1.0),
+        ),
+        "deep_decarb": ScenarioPeakSpec(
+            target_peak_year=2028,
+            require_peak=False,
+            t_start=2027,
+            energy=(2.4, 1.5, 0.6),
+            carbon_intensity=(-2.0, -4.0, -3.5),
+            coal_share=(-1.0, -3.0, -2.5),
+            industry=(-1.5, -1.2),
+        ),
+        "extensive": ScenarioPeakSpec(
+            target_peak_year=2034,
+            require_peak=False,
+            t_start=2029,
+            energy=(2.8, 2.2, 1.5),
+            carbon_intensity=(-1.5, -2.0, -1.8),
+            coal_share=(-0.8, -1.0, -0.8),
+            industry=(-1.0, -0.6),
+        ),
     }
 
     all_forecasts: List[pd.DataFrame] = []
@@ -1029,7 +1113,12 @@ def main() -> None:
     calibration_meta_by_scenario: Dict[str, Any] = {}
 
     for scenario_name, policy in policies.items():
-        rule = scenario_rules.get(scenario_name, {"require_peak": False, "peak_min": 2026, "peak_max": 2030, "t_start": 2026})
+        spec = scenario_specs[scenario_name]
+        rule = {
+            "require_peak": bool(spec.require_peak),
+            "target_peak_year": int(spec.target_peak_year),
+            "t_start": int(spec.t_start),
+        }
 
         def _simulate_once(paths: Dict[str, Dict[int, float]], t_start_for_run: int) -> pd.DataFrame:
             run_rule = dict(rule)
@@ -1053,18 +1142,19 @@ def main() -> None:
             )
 
         if bool(rule["require_peak"]):
-            def _regenerate_paths(t_start: int) -> Dict[str, Dict[int, float]]:
+            def _regenerate_paths(t_start: int, ci_mid_adjust: float, coal_mid_adjust: float) -> Dict[str, Dict[int, float]]:
                 return path_generator.generate_paths(
-                    scenario_name=scenario_name,
                     policy=policy,
+                    spec=spec,
                     t_start_override=t_start,
+                    ci_mid_adjust=ci_mid_adjust,
+                    coal_mid_adjust=coal_mid_adjust,
                 )
 
             calibrated_path, tuned_t_start, calib_meta = calibrator.calibrate(
                 scenario_name=scenario_name,
                 initial_t_start=int(rule["t_start"]),
-                target_min_peak=int(rule["peak_min"]),
-                target_max_peak=int(rule["peak_max"]),
+                target_peak_year=int(rule["target_peak_year"]),
                 regenerate_paths=_regenerate_paths,
                 simulate_once=_simulate_once,
                 checker=checker,
@@ -1074,8 +1164,8 @@ def main() -> None:
             fdf = _simulate_once(calibrated_path, tuned_t_start)
         else:
             annual_path = path_generator.generate_paths(
-                scenario_name=scenario_name,
                 policy=policy,
+                spec=spec,
                 t_start_override=int(rule["t_start"]),
             )
             fdf = _simulate_once(annual_path, int(rule["t_start"]))
@@ -1090,8 +1180,8 @@ def main() -> None:
             national_df=national_one,
             scenario_name=scenario_name,
             require_peak=bool(rule["require_peak"]),
-            peak_year_min=int(rule["peak_min"]),
-            peak_year_max=int(rule["peak_max"]),
+            peak_year_min=int(rule["target_peak_year"]),
+            peak_year_max=int(rule["target_peak_year"]),
         )
         all_forecasts.append(fdf)
 

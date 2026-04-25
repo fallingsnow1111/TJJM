@@ -1,6 +1,6 @@
 scenario,peak_year,peak_co2,peaked_within_horizon,note
-baseline,2028,819190.0380906856,True,已达峰
-deep_decarb,2024,774602.7143838677,True,已达峰
-extensive,2035,870130.7571727529,False,未在预测期内达峰
-green_growth,2028,793536.9517180478,True,已达峰
-low_carbon,2025,791380.1873758542,True,已达峰
+baseline,2028,801196.5759634533,True,已达峰
+deep_decarb,2024,774059.5522892579,True,已达峰
+extensive,2035,791798.7743841552,False,未在预测期内达峰
+green_growth,2029,806136.4779387536,True,已达峰
+low_carbon,2026,792947.2907358385,True,已达峰

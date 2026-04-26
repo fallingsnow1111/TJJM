@@ -132,10 +132,10 @@ class PathGenerator:
                 energy_rate = energy_rate + energy_early_adjust
                 if spec.require_peak:
                     # Prevent immediate turn-down before the designed decarbonization start.
-                    ci = max(ci, -0.004)
-                    coal = max(coal, -0.35)
-                    energy_rate = energy_rate + 0.004
-            elif year < t_peak:
+                    ci = max(ci, -0.002)
+                    coal = max(coal, -0.20)
+                    energy_rate = energy_rate + 0.006
+            elif year <= t_peak:
                 ci = (ci_mid / 100.0) + ci_mid_adjust
                 coal = coal_mid + coal_mid_adjust
                 energy_rate = energy_rate + energy_mid_adjust
@@ -342,16 +342,16 @@ class Calibrator:
                 t_start = min(t_start + 1, 2033)
                 ci_mid_adjust = min(ci_mid_adjust + 0.004, 0.03)
                 coal_mid_adjust = min(coal_mid_adjust + 0.15, 1.5)
-                energy_early_adjust = min(energy_early_adjust + 0.003, 0.04)
+                energy_early_adjust = min(energy_early_adjust + 0.005, 0.08)
                 # Peak is too early: raise mid-stage energy growth to postpone peak.
-                energy_mid_adjust = min(energy_mid_adjust + 0.003, 0.04)
+                energy_mid_adjust = min(energy_mid_adjust + 0.005, 0.08)
             elif peak_year > target_peak_year:
                 t_start = max(t_start - 1, 2024)
                 ci_mid_adjust = max(ci_mid_adjust - 0.004, -0.03)
                 coal_mid_adjust = max(coal_mid_adjust - 0.15, -1.5)
-                energy_early_adjust = max(energy_early_adjust - 0.003, -0.04)
+                energy_early_adjust = max(energy_early_adjust - 0.005, -0.08)
                 # Peak is too late: reduce mid-stage energy growth to advance peak.
-                energy_mid_adjust = max(energy_mid_adjust - 0.003, -0.04)
+                energy_mid_adjust = max(energy_mid_adjust - 0.005, -0.08)
 
         if best is None:
             best = {
@@ -423,8 +423,8 @@ def build_scenario_policy() -> Dict[str, Dict[str, Dict[str, float]]]:
     extensive = {
         "Population": dict(base_shared["Population"]),
         "pGDP": {"2024_2025": 0.05, "2026_2030": 0.045, "2031_2035": 0.04},
-        "OilShare": {"2024_2025": -0.05, "2026_2030": -0.02, "2031_2035": 0.0},
-        "GasShare": {"2024_2025": 0.05, "2026_2030": 0.05, "2031_2035": 0.03},
+        "OilShare": {"2024_2025": 0.0, "2026_2030": 0.0, "2031_2035": 0.0},
+        "GasShare": {"2024_2025": 0.0, "2026_2030": 0.0, "2031_2035": 0.0},
         "Urbanization": dict(base_shared["Urbanization"]),
     }
 
@@ -740,11 +740,12 @@ def forecast_scenario(
             prev_energy = float(prev["Energy"])
             energy_pred = float(energy_inertia_alpha * prev_energy + (1.0 - energy_inertia_alpha) * energy_model_pred)
 
-            # Softly align with policy trajectory before target peak year.
-            # This avoids an immediate peak without reintroducing hard floors.
-            if require_peak and year <= (target_peak_year - 1):
+            # Softly align with the policy trajectory through the target peak year.
+            # Otherwise the model-side energy inertia can pull the target year below
+            # the previous year, shifting the national peak one year too early.
+            if require_peak and year <= target_peak_year:
                 policy_energy = float(row["Energy"])
-                w_policy = 0.60 if year <= (t_start + 1) else 0.35
+                w_policy = 0.88
                 energy_pred = float((1.0 - w_policy) * energy_pred + w_policy * policy_energy)
 
             hybrid_log_energy = _safe_log(energy_pred)
@@ -1037,37 +1038,37 @@ def main() -> None:
             target_peak_year=2030,
             require_peak=True,
             t_start=2029,
-            energy=(3.2, 2.5, 1.3),
-            carbon_intensity=(-1.2, -2.7, -2.5),
-            coal_share=(-0.6, -1.6, -1.2),
+            energy=(3.6, 3.0, 1.2),
+            carbon_intensity=(-0.9, -2.4, -2.8),
+            coal_share=(-0.4, -1.4, -1.4),
             industry=(-1.2, -0.8),
         ),
         "low_carbon": ScenarioPeakSpec(
             target_peak_year=2029,
             require_peak=True,
             t_start=2028,
-            energy=(3.0, 2.3, 1.0),
-            carbon_intensity=(-1.5, -3.0, -2.8),
-            coal_share=(-0.8, -1.9, -1.5),
+            energy=(2.8, 2.3, 0.9),
+            carbon_intensity=(-1.4, -3.2, -3.0),
+            coal_share=(-0.7, -2.0, -1.7),
             industry=(-1.5, -1.1),
         ),
         "green_growth": ScenarioPeakSpec(
             target_peak_year=2030,
             require_peak=True,
             t_start=2027,
-            energy=(3.4, 2.7, 1.5),
-            carbon_intensity=(-1.3, -2.8, -2.5),
-            coal_share=(-0.6, -1.7, -1.2),
+            energy=(3.9, 3.2, 1.4),
+            carbon_intensity=(-0.9, -2.5, -2.8),
+            coal_share=(-0.4, -1.5, -1.4),
             industry=(-1.3, -1.0),
         ),
         "extensive": ScenarioPeakSpec(
             target_peak_year=2034,
             require_peak=False,
             t_start=2029,
-            energy=(2.8, 2.2, 1.5),
-            carbon_intensity=(-1.5, -2.0, -1.8),
-            coal_share=(-0.8, -1.0, -0.8),
-            industry=(-1.0, -0.6),
+            energy=(4.4, 4.0, 3.4),
+            carbon_intensity=(-0.2, -0.1, 0.0),
+            coal_share=(0.0, 0.0, 0.0),
+            industry=(-0.2, 0.0),
         ),
     }
 

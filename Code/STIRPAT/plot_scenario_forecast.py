@@ -250,21 +250,6 @@ def plot_trend_with_peak(
             label=_pretty_name(scenario),
         )
 
-        one_peak = peak_df.loc[peak_df["scenario"] == scenario]
-        if not one_peak.empty:
-            py = int(one_peak.iloc[0]["peak_year"])
-            pv = float(one_peak.iloc[0]["peak_co2"]) * align_factor
-            ax.scatter([py], [pv], color=st["color"], s=75, zorder=4)
-            note = "未达峰" if py == 2035 else f"{py}: {pv:.1f}"
-            ax.annotate(
-                f"{_pretty_name(scenario)} peak\n{note}",
-                xy=(py, pv),
-                xytext=(8, 10),
-                textcoords="offset points",
-                fontsize=9,
-                color=st["color"],
-            )
-
     ax.set_title("National CO2 History and Scenario Forecast (1990-2035)", fontsize=14)
     ax.set_xlabel("Year")
     ax.set_ylabel("CO2 Emissions")

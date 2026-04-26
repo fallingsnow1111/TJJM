@@ -1,0 +1,103 @@
+{
+  "config": {
+    "panel_with_residual_csv": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\dataset\\panel_with_residual.csv",
+    "dataset_npz": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\dataset\\stirpat_ee_gru_dataset.npz",
+    "model_ckpt": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\model\\best_ee_gru.pt",
+    "output_dir": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\STIRPAT\\output\\historical_backtest",
+    "start_year": 1990,
+    "end_year": 2023,
+    "window": 3,
+    "batch_size": 256
+  },
+  "metrics": [
+    {
+      "scope": "province_pooled",
+      "target": "energy",
+      "model": "stirpat_only",
+      "n": 1020,
+      "mae": 862.2273332310971,
+      "rmse": 1465.0741462910432,
+      "mape": 0.11871945836993025,
+      "smape": 0.11509693410241034,
+      "r2": 0.9457045583434058
+    },
+    {
+      "scope": "province_pooled",
+      "target": "energy",
+      "model": "hybrid_reconstruct",
+      "n": 930,
+      "mae": 365.6801860782026,
+      "rmse": 606.9764665432261,
+      "mape": 0.05005343028831455,
+      "smape": 0.050248333197918556,
+      "r2": 0.9907551211029079
+    },
+    {
+      "scope": "province_pooled",
+      "target": "co2",
+      "model": "stirpat_only",
+      "n": 1020,
+      "mae": 25.574407501832503,
+      "rmse": 42.882681110283976,
+      "mape": 0.11871945836993025,
+      "smape": 0.11509693410241034,
+      "r2": 0.9447807401944296
+    },
+    {
+      "scope": "province_pooled",
+      "target": "co2",
+      "model": "hybrid_reconstruct",
+      "n": 930,
+      "mae": 11.12108615361042,
+      "rmse": 18.804894021556144,
+      "mape": 0.05005343028831454,
+      "smape": 0.050248333197918556,
+      "r2": 0.9896814524090893
+    },
+    {
+      "scope": "national_yearly",
+      "target": "energy",
+      "model": "stirpat_only",
+      "n": 34,
+      "mae": 10446.323702917338,
+      "rmse": 14341.676162608639,
+      "mape": 0.05209683681267464,
+      "smape": 0.051810492855023024,
+      "r2": 0.9862897331892143
+    },
+    {
+      "scope": "national_yearly",
+      "target": "energy",
+      "model": "hybrid_reconstruct",
+      "n": 31,
+      "mae": 5614.637163159545,
+      "rmse": 7226.357598475704,
+      "mape": 0.02814467137042796,
+      "smape": 0.02834363838563421,
+      "r2": 0.9960850471887012
+    },
+    {
+      "scope": "national_yearly",
+      "target": "co2",
+      "model": "stirpat_only",
+      "n": 34,
+      "mae": 275.8616794820206,
+      "rmse": 359.94591878247047,
+      "mape": 0.048450496146245164,
+      "smape": 0.04818013441318811,
+      "r2": 0.9869062684430526
+    },
+    {
+      "scope": "national_yearly",
+      "target": "co2",
+      "model": "hybrid_reconstruct",
+      "n": 31,
+      "mae": 178.81505500283023,
+      "rmse": 224.65289400043946,
+      "mape": 0.029397982007172137,
+      "smape": 0.02955667199796112,
+      "r2": 0.9943879996503804
+    }
+  ],
+  "note": "Hybrid reconstruction starts after the lag window. CO2 predictions are converted from predicted energy using observed historical CO2/Energy intensity."
+}

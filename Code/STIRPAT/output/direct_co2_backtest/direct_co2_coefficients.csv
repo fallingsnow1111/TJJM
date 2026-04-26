@@ -1,0 +1,23 @@
+model,feature,coef,note
+core_drivers,log_Population,0.5880184313583604,direct log_CO2 ridge coefficient; province fixed effects omitted
+core_drivers,log_pGDP,0.32530294456407766,direct log_CO2 ridge coefficient; province fixed effects omitted
+core_drivers,Industry,0.009273139487402727,direct log_CO2 ridge coefficient; province fixed effects omitted
+core_drivers,Urbanization,0.014460800243479718,direct log_CO2 ridge coefficient; province fixed effects omitted
+core_drivers,EnergyIntensity,0.054214973001438016,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,log_Population,0.584784958054186,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,log_pGDP,0.3503007990356661,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,Industry,0.0061214325457509084,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,Urbanization,0.012364973468350485,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,EnergyIntensity,-0.00731519936300196,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,CoalShare,-0.013083870466719608,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,OilShare,-0.028879014418707733,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,GasShare,-0.011687234107000701,direct log_CO2 ridge coefficient; province fixed effects omitted
+structure_drivers,NonFossilShare,-0.017113928795554702,direct log_CO2 ridge coefficient; province fixed effects omitted
+with_energy,log_Population,0.2081513560102191,direct log_CO2 ridge coefficient; province fixed effects omitted
+with_energy,log_pGDP,0.15672083179201987,direct log_CO2 ridge coefficient; province fixed effects omitted
+with_energy,log_Energy,0.35248734684148036,direct log_CO2 ridge coefficient; province fixed effects omitted
+with_energy,Industry,0.0025110809539759193,direct log_CO2 ridge coefficient; province fixed effects omitted
+with_energy,Urbanization,0.009502164433026624,direct log_CO2 ridge coefficient; province fixed effects omitted
+with_energy,CoalShare,-0.00018218981261681753,direct log_CO2 ridge coefficient; province fixed effects omitted
+with_energy,OilShare,-0.010984904351934301,direct log_CO2 ridge coefficient; province fixed effects omitted
+with_energy,GasShare,0.005632690127411847,direct log_CO2 ridge coefficient; province fixed effects omitted

@@ -111,6 +111,11 @@ class PathGenerator:
         ci_early, ci_mid, ci_late = spec.carbon_intensity
         coal_early, coal_mid, coal_late = spec.coal_share
 
+        # These variables are governed by ScenarioPeakSpec and may not exist in base policy.
+        for var in ["Energy", "Industry", "CarbonIntensity", "EnergyIntensity", "CoalShare"]:
+            if var not in annual:
+                annual[var] = {}
+
         for year in range(self.start_year, self.end_year + 1):
             energy_rate = self._piecewise_value(year, *spec.energy) / 100.0
             annual["Industry"][year] = float(spec.industry[0] if year <= 2027 else spec.industry[1])

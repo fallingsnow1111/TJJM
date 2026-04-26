@@ -22,489 +22,755 @@
   },
   "constraint_report": {
     "baseline": [
-      "baseline: peak year 2028 out of [2029, 2029]"
+      "baseline: peak year 2029 out of [2030, 2030]",
+      "baseline: NonFossilShare below target in 2029 (target=24.00)"
     ],
     "low_carbon": [
-      "low_carbon: peak year 2026 out of [2027, 2027]"
+      "low_carbon: peak year 2028 out of [2029, 2029]",
+      "low_carbon: g_CO2 at peak-1 not in [0, 1%]"
     ],
     "extensive": [],
     "green_growth": [
-      "green_growth: peak year 2029 out of [2030, 2030]"
-    ],
-    "deep_decarb": []
+      "green_growth: peak year 2029 out of [2030, 2030]",
+      "green_growth: g_CO2 at peak-1 not in [0, 1%]"
+    ]
   },
   "calibration_meta": {
     "baseline": {
       "iterations": 20,
-      "peak_year": 2028,
-      "target_peak_year": 2029,
+      "peak_year": 2029,
+      "target_peak_year": 2030,
       "objective": 1.0,
-      "t_start": 2026,
-      "ci_mid_adjust": 0.0,
-      "coal_mid_adjust": 0.0,
+      "t_start": 2030,
+      "ci_mid_adjust": 0.004,
+      "coal_mid_adjust": 0.15,
+      "energy_early_adjust": 0.003,
+      "energy_mid_adjust": 0.003,
       "violations": [
-        "baseline: peak year 2028 out of [2029, 2029]"
+        "baseline: peak year 2029 out of [2030, 2030]",
+        "baseline: NonFossilShare below target in 2029 (target=24.00)"
       ],
       "history": [
         {
           "iter": 1,
           "peak_year": 2028,
-          "target_peak": 2029,
-          "objective": 1.0,
-          "t_start": 2026,
+          "target_peak": 2030,
+          "objective": 4.0,
+          "t_start": 2029,
           "ci_mid_adjust": 0.0,
           "coal_mid_adjust": 0.0,
-          "violations": 1
+          "energy_early_adjust": 0.0,
+          "energy_mid_adjust": 0.0,
+          "violations": 2
         },
         {
           "iter": 2,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
-          "t_start": 2027,
-          "ci_mid_adjust": 0.003,
-          "coal_mid_adjust": 0.1,
-          "violations": 1
+          "t_start": 2030,
+          "ci_mid_adjust": 0.004,
+          "coal_mid_adjust": 0.15,
+          "energy_early_adjust": 0.003,
+          "energy_mid_adjust": 0.003,
+          "violations": 2
         },
         {
           "iter": 3,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
-          "t_start": 2028,
-          "ci_mid_adjust": 0.006,
-          "coal_mid_adjust": 0.2,
-          "violations": 1
+          "t_start": 2031,
+          "ci_mid_adjust": 0.008,
+          "coal_mid_adjust": 0.3,
+          "energy_early_adjust": 0.006,
+          "energy_mid_adjust": 0.006,
+          "violations": 7
         },
         {
           "iter": 4,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
-          "t_start": 2029,
-          "ci_mid_adjust": 0.009000000000000001,
-          "coal_mid_adjust": 0.30000000000000004,
-          "violations": 1
+          "t_start": 2032,
+          "ci_mid_adjust": 0.012,
+          "coal_mid_adjust": 0.44999999999999996,
+          "energy_early_adjust": 0.009000000000000001,
+          "energy_mid_adjust": 0.009000000000000001,
+          "violations": 9
         },
         {
           "iter": 5,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
-          "t_start": 2030,
-          "ci_mid_adjust": 0.012,
-          "coal_mid_adjust": 0.4,
-          "violations": 1
+          "t_start": 2033,
+          "ci_mid_adjust": 0.016,
+          "coal_mid_adjust": 0.6,
+          "energy_early_adjust": 0.012,
+          "energy_mid_adjust": 0.012,
+          "violations": 9
         },
         {
           "iter": 6,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
-          "t_start": 2031,
-          "ci_mid_adjust": 0.015,
-          "coal_mid_adjust": 0.5,
-          "violations": 1
+          "t_start": 2033,
+          "ci_mid_adjust": 0.02,
+          "coal_mid_adjust": 0.75,
+          "energy_early_adjust": 0.015,
+          "energy_mid_adjust": 0.015,
+          "violations": 9
         },
         {
           "iter": 7,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
-          "t_start": 2032,
-          "ci_mid_adjust": 0.018,
-          "coal_mid_adjust": 0.6,
-          "violations": 1
+          "t_start": 2033,
+          "ci_mid_adjust": 0.024,
+          "coal_mid_adjust": 0.9,
+          "energy_early_adjust": 0.018,
+          "energy_mid_adjust": 0.018,
+          "violations": 9
         },
         {
           "iter": 8,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.7,
-          "violations": 1
+          "ci_mid_adjust": 0.028,
+          "coal_mid_adjust": 1.05,
+          "energy_early_adjust": 0.020999999999999998,
+          "energy_mid_adjust": 0.020999999999999998,
+          "violations": 9
         },
         {
           "iter": 9,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.7999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.2,
+          "energy_early_adjust": 0.023999999999999997,
+          "energy_mid_adjust": 0.023999999999999997,
+          "violations": 9
         },
         {
           "iter": 10,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.8999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.3499999999999999,
+          "energy_early_adjust": 0.026999999999999996,
+          "energy_mid_adjust": 0.026999999999999996,
+          "violations": 9
         },
         {
           "iter": 11,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.9999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.4999999999999998,
+          "energy_early_adjust": 0.029999999999999995,
+          "energy_mid_adjust": 0.029999999999999995,
+          "violations": 9
         },
         {
           "iter": 12,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.032999999999999995,
+          "energy_mid_adjust": 0.032999999999999995,
+          "violations": 9
         },
         {
           "iter": 13,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.036,
+          "energy_mid_adjust": 0.036,
+          "violations": 9
         },
         {
           "iter": 14,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.039,
+          "energy_mid_adjust": 0.039,
+          "violations": 9
         },
         {
           "iter": 15,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 9
         },
         {
           "iter": 16,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 9
         },
         {
           "iter": 17,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 9
         },
         {
           "iter": 18,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 9
         },
         {
           "iter": 19,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 9
         },
         {
           "iter": 20,
-          "peak_year": 2028,
-          "target_peak": 2029,
+          "peak_year": 2029,
+          "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 9
         }
       ],
-      "t_start_final": 2026
+      "t_start_final": 2030,
+      "final_policy_path": {
+        "Population": {
+          "2024_2027": 0.00025,
+          "2028_2030": 0.0,
+          "2031_2035": -0.0005
+        },
+        "pGDP": {
+          "2024_2027": 0.0475,
+          "2028_2030": 0.045000000000000005,
+          "2031_2035": 0.04
+        },
+        "OilShare": {
+          "2024_2027": -0.125,
+          "2028_2030": -0.10000000000000002,
+          "2031_2035": -0.1
+        },
+        "GasShare": {
+          "2024_2027": 0.1,
+          "2028_2030": 0.10000000000000002,
+          "2031_2035": 0.05
+        },
+        "Urbanization": {
+          "2024_2027": 0.7,
+          "2028_2030": 0.65,
+          "2031_2035": 0.5
+        },
+        "Energy": {
+          "2024_2027": 0.03900000000000001,
+          "2028_2030": 0.029666666666666664,
+          "2031_2035": 0.013000000000000001
+        },
+        "Industry": {
+          "2024_2027": -1.2,
+          "2028_2030": -0.8000000000000002,
+          "2031_2035": -0.8
+        },
+        "CarbonIntensity": {
+          "2024_2027": -0.004,
+          "2028_2030": -0.011000000000000001,
+          "2031_2035": -0.025
+        },
+        "EnergyIntensity": {
+          "2024_2027": -0.0032,
+          "2028_2030": -0.0088,
+          "2031_2035": -0.020000000000000004
+        },
+        "CoalShare": {
+          "2024_2027": -0.35,
+          "2028_2030": -0.6333333333333333,
+          "2031_2035": -1.2
+        }
+      }
     },
     "low_carbon": {
       "iterations": 20,
-      "peak_year": 2026,
-      "target_peak_year": 2027,
+      "peak_year": 2028,
+      "target_peak_year": 2029,
       "objective": 1.0,
-      "t_start": 2025,
-      "ci_mid_adjust": 0.0,
-      "coal_mid_adjust": 0.0,
+      "t_start": 2029,
+      "ci_mid_adjust": 0.004,
+      "coal_mid_adjust": 0.15,
+      "energy_early_adjust": 0.003,
+      "energy_mid_adjust": 0.003,
       "violations": [
-        "low_carbon: peak year 2026 out of [2027, 2027]"
+        "low_carbon: peak year 2028 out of [2029, 2029]",
+        "low_carbon: g_CO2 at peak-1 not in [0, 1%]"
       ],
       "history": [
         {
           "iter": 1,
-          "peak_year": 2026,
-          "target_peak": 2027,
-          "objective": 1.0,
-          "t_start": 2025,
+          "peak_year": 2027,
+          "target_peak": 2029,
+          "objective": 4.0,
+          "t_start": 2028,
           "ci_mid_adjust": 0.0,
           "coal_mid_adjust": 0.0,
-          "violations": 1
+          "energy_early_adjust": 0.0,
+          "energy_mid_adjust": 0.0,
+          "violations": 2
         },
         {
           "iter": 2,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
-          "t_start": 2026,
-          "ci_mid_adjust": 0.003,
-          "coal_mid_adjust": 0.1,
-          "violations": 1
+          "t_start": 2029,
+          "ci_mid_adjust": 0.004,
+          "coal_mid_adjust": 0.15,
+          "energy_early_adjust": 0.003,
+          "energy_mid_adjust": 0.003,
+          "violations": 2
         },
         {
           "iter": 3,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
-          "t_start": 2027,
-          "ci_mid_adjust": 0.006,
-          "coal_mid_adjust": 0.2,
-          "violations": 1
+          "t_start": 2030,
+          "ci_mid_adjust": 0.008,
+          "coal_mid_adjust": 0.3,
+          "energy_early_adjust": 0.006,
+          "energy_mid_adjust": 0.006,
+          "violations": 2
         },
         {
           "iter": 4,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
-          "t_start": 2028,
-          "ci_mid_adjust": 0.009000000000000001,
-          "coal_mid_adjust": 0.30000000000000004,
-          "violations": 1
+          "t_start": 2031,
+          "ci_mid_adjust": 0.012,
+          "coal_mid_adjust": 0.44999999999999996,
+          "energy_early_adjust": 0.009000000000000001,
+          "energy_mid_adjust": 0.009000000000000001,
+          "violations": 3
         },
         {
           "iter": 5,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
-          "t_start": 2029,
-          "ci_mid_adjust": 0.012,
-          "coal_mid_adjust": 0.4,
-          "violations": 1
+          "t_start": 2032,
+          "ci_mid_adjust": 0.016,
+          "coal_mid_adjust": 0.6,
+          "energy_early_adjust": 0.012,
+          "energy_mid_adjust": 0.012,
+          "violations": 5
         },
         {
           "iter": 6,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
-          "t_start": 2030,
-          "ci_mid_adjust": 0.015,
-          "coal_mid_adjust": 0.5,
-          "violations": 1
+          "t_start": 2033,
+          "ci_mid_adjust": 0.02,
+          "coal_mid_adjust": 0.75,
+          "energy_early_adjust": 0.015,
+          "energy_mid_adjust": 0.015,
+          "violations": 7
         },
         {
           "iter": 7,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
-          "t_start": 2031,
-          "ci_mid_adjust": 0.018,
-          "coal_mid_adjust": 0.6,
-          "violations": 1
+          "t_start": 2033,
+          "ci_mid_adjust": 0.024,
+          "coal_mid_adjust": 0.9,
+          "energy_early_adjust": 0.018,
+          "energy_mid_adjust": 0.018,
+          "violations": 7
         },
         {
           "iter": 8,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
-          "t_start": 2032,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.7,
-          "violations": 1
+          "t_start": 2033,
+          "ci_mid_adjust": 0.028,
+          "coal_mid_adjust": 1.05,
+          "energy_early_adjust": 0.020999999999999998,
+          "energy_mid_adjust": 0.020999999999999998,
+          "violations": 7
         },
         {
           "iter": 9,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.7999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.2,
+          "energy_early_adjust": 0.023999999999999997,
+          "energy_mid_adjust": 0.023999999999999997,
+          "violations": 7
         },
         {
           "iter": 10,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.8999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.3499999999999999,
+          "energy_early_adjust": 0.026999999999999996,
+          "energy_mid_adjust": 0.026999999999999996,
+          "violations": 7
         },
         {
           "iter": 11,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.9999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.4999999999999998,
+          "energy_early_adjust": 0.029999999999999995,
+          "energy_mid_adjust": 0.029999999999999995,
+          "violations": 7
         },
         {
           "iter": 12,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.032999999999999995,
+          "energy_mid_adjust": 0.032999999999999995,
+          "violations": 7
         },
         {
           "iter": 13,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.036,
+          "energy_mid_adjust": 0.036,
+          "violations": 7
         },
         {
           "iter": 14,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.039,
+          "energy_mid_adjust": 0.039,
+          "violations": 7
         },
         {
           "iter": 15,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 7
         },
         {
           "iter": 16,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 7
         },
         {
           "iter": 17,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 7
         },
         {
           "iter": 18,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 7
         },
         {
           "iter": 19,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 7
         },
         {
           "iter": 20,
-          "peak_year": 2026,
-          "target_peak": 2027,
+          "peak_year": 2028,
+          "target_peak": 2029,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 7
         }
       ],
-      "t_start_final": 2025
+      "t_start_final": 2029,
+      "final_policy_path": {
+        "Population": {
+          "2024_2027": 0.00025,
+          "2028_2030": 0.0,
+          "2031_2035": -0.0005
+        },
+        "pGDP": {
+          "2024_2027": 0.0475,
+          "2028_2030": 0.045000000000000005,
+          "2031_2035": 0.04
+        },
+        "OilShare": {
+          "2024_2027": -0.22499999999999998,
+          "2028_2030": -0.20000000000000004,
+          "2031_2035": -0.2
+        },
+        "GasShare": {
+          "2024_2027": 0.15,
+          "2028_2030": 0.15,
+          "2031_2035": 0.1
+        },
+        "Urbanization": {
+          "2024_2027": 0.7,
+          "2028_2030": 0.65,
+          "2031_2035": 0.5
+        },
+        "Energy": {
+          "2024_2027": 0.037000000000000005,
+          "2028_2030": 0.025333333333333333,
+          "2031_2035": 0.01
+        },
+        "Industry": {
+          "2024_2027": -1.5,
+          "2028_2030": -1.1,
+          "2031_2035": -1.1
+        },
+        "CarbonIntensity": {
+          "2024_2027": -0.004,
+          "2028_2030": -0.02,
+          "2031_2035": -0.027999999999999997
+        },
+        "EnergyIntensity": {
+          "2024_2027": -0.0032,
+          "2028_2030": -0.016,
+          "2031_2035": -0.0224
+        },
+        "CoalShare": {
+          "2024_2027": -0.35,
+          "2028_2030": -1.1166666666666667,
+          "2031_2035": -1.5
+        }
+      }
+    },
+    "extensive": {
+      "iterations": 0,
+      "peak_year": null,
+      "target_peak_year": 2034,
+      "t_start": 2029,
+      "t_start_final": 2029,
+      "ci_mid_adjust": 0.0,
+      "coal_mid_adjust": 0.0,
+      "energy_early_adjust": 0.0,
+      "energy_mid_adjust": 0.0,
+      "violations": [],
+      "history": [],
+      "final_policy_path": {
+        "Population": {
+          "2024_2027": 0.00025,
+          "2028_2030": 0.0,
+          "2031_2035": -0.0005
+        },
+        "pGDP": {
+          "2024_2027": 0.0475,
+          "2028_2030": 0.045000000000000005,
+          "2031_2035": 0.04
+        },
+        "OilShare": {
+          "2024_2027": -0.035,
+          "2028_2030": -0.02,
+          "2031_2035": 0.0
+        },
+        "GasShare": {
+          "2024_2027": 0.05,
+          "2028_2030": 0.05000000000000001,
+          "2031_2035": 0.03
+        },
+        "Urbanization": {
+          "2024_2027": 0.7,
+          "2028_2030": 0.65,
+          "2031_2035": 0.5
+        },
+        "Energy": {
+          "2024_2027": 0.027999999999999997,
+          "2028_2030": 0.022000000000000002,
+          "2031_2035": 0.015
+        },
+        "Industry": {
+          "2024_2027": -1.0,
+          "2028_2030": -0.6,
+          "2031_2035": -0.6
+        },
+        "CarbonIntensity": {
+          "2024_2027": -0.015,
+          "2028_2030": -0.018333333333333337,
+          "2031_2035": -0.019200000000000002
+        },
+        "EnergyIntensity": {
+          "2024_2027": -0.012,
+          "2028_2030": -0.014666666666666666,
+          "2031_2035": -0.015360000000000002
+        },
+        "CoalShare": {
+          "2024_2027": -0.8,
+          "2028_2030": -0.9333333333333332,
+          "2031_2035": -0.9199999999999999
+        }
+      }
     },
     "green_growth": {
       "iterations": 20,
       "peak_year": 2029,
       "target_peak_year": 2030,
       "objective": 1.0,
-      "t_start": 2027,
-      "ci_mid_adjust": 0.0,
-      "coal_mid_adjust": 0.0,
+      "t_start": 2030,
+      "ci_mid_adjust": 0.012,
+      "coal_mid_adjust": 0.44999999999999996,
+      "energy_early_adjust": 0.009000000000000001,
+      "energy_mid_adjust": 0.009000000000000001,
       "violations": [
-        "green_growth: peak year 2029 out of [2030, 2030]"
+        "green_growth: peak year 2029 out of [2030, 2030]",
+        "green_growth: g_CO2 at peak-1 not in [0, 1%]"
       ],
       "history": [
         {
           "iter": 1,
-          "peak_year": 2029,
+          "peak_year": 2026,
           "target_peak": 2030,
-          "objective": 1.0,
+          "objective": 16.0,
           "t_start": 2027,
           "ci_mid_adjust": 0.0,
           "coal_mid_adjust": 0.0,
-          "violations": 1
+          "energy_early_adjust": 0.0,
+          "energy_mid_adjust": 0.0,
+          "violations": 2
         },
         {
           "iter": 2,
-          "peak_year": 2029,
+          "peak_year": 2027,
           "target_peak": 2030,
-          "objective": 1.0,
+          "objective": 9.0,
           "t_start": 2028,
-          "ci_mid_adjust": 0.003,
-          "coal_mid_adjust": 0.1,
-          "violations": 1
+          "ci_mid_adjust": 0.004,
+          "coal_mid_adjust": 0.15,
+          "energy_early_adjust": 0.003,
+          "energy_mid_adjust": 0.003,
+          "violations": 2
         },
         {
           "iter": 3,
-          "peak_year": 2029,
+          "peak_year": 2028,
           "target_peak": 2030,
-          "objective": 1.0,
+          "objective": 4.0,
           "t_start": 2029,
-          "ci_mid_adjust": 0.006,
-          "coal_mid_adjust": 0.2,
-          "violations": 1
+          "ci_mid_adjust": 0.008,
+          "coal_mid_adjust": 0.3,
+          "energy_early_adjust": 0.006,
+          "energy_mid_adjust": 0.006,
+          "violations": 2
         },
         {
           "iter": 4,
@@ -512,9 +778,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2030,
-          "ci_mid_adjust": 0.009000000000000001,
-          "coal_mid_adjust": 0.30000000000000004,
-          "violations": 1
+          "ci_mid_adjust": 0.012,
+          "coal_mid_adjust": 0.44999999999999996,
+          "energy_early_adjust": 0.009000000000000001,
+          "energy_mid_adjust": 0.009000000000000001,
+          "violations": 2
         },
         {
           "iter": 5,
@@ -522,9 +790,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2031,
-          "ci_mid_adjust": 0.012,
-          "coal_mid_adjust": 0.4,
-          "violations": 1
+          "ci_mid_adjust": 0.016,
+          "coal_mid_adjust": 0.6,
+          "energy_early_adjust": 0.012,
+          "energy_mid_adjust": 0.012,
+          "violations": 4
         },
         {
           "iter": 6,
@@ -532,9 +802,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2032,
-          "ci_mid_adjust": 0.015,
-          "coal_mid_adjust": 0.5,
-          "violations": 1
+          "ci_mid_adjust": 0.02,
+          "coal_mid_adjust": 0.75,
+          "energy_early_adjust": 0.015,
+          "energy_mid_adjust": 0.015,
+          "violations": 7
         },
         {
           "iter": 7,
@@ -542,9 +814,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.018,
-          "coal_mid_adjust": 0.6,
-          "violations": 1
+          "ci_mid_adjust": 0.024,
+          "coal_mid_adjust": 0.9,
+          "energy_early_adjust": 0.018,
+          "energy_mid_adjust": 0.018,
+          "violations": 8
         },
         {
           "iter": 8,
@@ -552,9 +826,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.7,
-          "violations": 1
+          "ci_mid_adjust": 0.028,
+          "coal_mid_adjust": 1.05,
+          "energy_early_adjust": 0.020999999999999998,
+          "energy_mid_adjust": 0.020999999999999998,
+          "violations": 8
         },
         {
           "iter": 9,
@@ -562,9 +838,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.7999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.2,
+          "energy_early_adjust": 0.023999999999999997,
+          "energy_mid_adjust": 0.023999999999999997,
+          "violations": 8
         },
         {
           "iter": 10,
@@ -572,9 +850,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.8999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.3499999999999999,
+          "energy_early_adjust": 0.026999999999999996,
+          "energy_mid_adjust": 0.026999999999999996,
+          "violations": 8
         },
         {
           "iter": 11,
@@ -582,9 +862,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 0.9999999999999999,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.4999999999999998,
+          "energy_early_adjust": 0.029999999999999995,
+          "energy_mid_adjust": 0.029999999999999995,
+          "violations": 8
         },
         {
           "iter": 12,
@@ -592,9 +874,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.032999999999999995,
+          "energy_mid_adjust": 0.032999999999999995,
+          "violations": 8
         },
         {
           "iter": 13,
@@ -602,9 +886,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.036,
+          "energy_mid_adjust": 0.036,
+          "violations": 8
         },
         {
           "iter": 14,
@@ -612,9 +898,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.039,
+          "energy_mid_adjust": 0.039,
+          "violations": 8
         },
         {
           "iter": 15,
@@ -622,9 +910,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 8
         },
         {
           "iter": 16,
@@ -632,9 +922,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 8
         },
         {
           "iter": 17,
@@ -642,9 +934,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 8
         },
         {
           "iter": 18,
@@ -652,9 +946,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 8
         },
         {
           "iter": 19,
@@ -662,9 +958,11 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 8
         },
         {
           "iter": 20,
@@ -672,47 +970,94 @@
           "target_peak": 2030,
           "objective": 1.0,
           "t_start": 2033,
-          "ci_mid_adjust": 0.02,
-          "coal_mid_adjust": 1.0,
-          "violations": 1
+          "ci_mid_adjust": 0.03,
+          "coal_mid_adjust": 1.5,
+          "energy_early_adjust": 0.04,
+          "energy_mid_adjust": 0.04,
+          "violations": 8
         }
       ],
-      "t_start_final": 2027
+      "t_start_final": 2030,
+      "final_policy_path": {
+        "Population": {
+          "2024_2027": 0.00025,
+          "2028_2030": 0.0,
+          "2031_2035": -0.0005
+        },
+        "pGDP": {
+          "2024_2027": 0.0495,
+          "2028_2030": 0.04700000000000001,
+          "2031_2035": 0.042
+        },
+        "OilShare": {
+          "2024_2027": -0.22499999999999998,
+          "2028_2030": -0.20000000000000004,
+          "2031_2035": -0.2
+        },
+        "GasShare": {
+          "2024_2027": 0.15,
+          "2028_2030": 0.15,
+          "2031_2035": 0.1
+        },
+        "Urbanization": {
+          "2024_2027": 0.7,
+          "2028_2030": 0.65,
+          "2031_2035": 0.5
+        },
+        "Energy": {
+          "2024_2027": 0.047,
+          "2028_2030": 0.03566666666666667,
+          "2031_2035": 0.015
+        },
+        "Industry": {
+          "2024_2027": -1.3,
+          "2028_2030": -1.0,
+          "2031_2035": -1.0
+        },
+        "CarbonIntensity": {
+          "2024_2027": -0.004,
+          "2028_2030": -0.011000000000000001,
+          "2031_2035": -0.025
+        },
+        "EnergyIntensity": {
+          "2024_2027": -0.0032,
+          "2028_2030": -0.0088,
+          "2031_2035": -0.020000000000000004
+        },
+        "CoalShare": {
+          "2024_2027": -0.35,
+          "2028_2030": -0.6333333333333333,
+          "2031_2035": -1.2
+        }
+      }
     }
   },
   "scenarios": [
     {
       "scenario": "baseline",
-      "peak_year": 2028,
-      "peak_co2": 801196.5759634533,
-      "peaked_within_horizon": true,
-      "note": "已达峰"
-    },
-    {
-      "scenario": "deep_decarb",
-      "peak_year": 2024,
-      "peak_co2": 774059.5522892579,
+      "peak_year": 2029,
+      "peak_co2": 840930.3543391202,
       "peaked_within_horizon": true,
       "note": "已达峰"
     },
     {
       "scenario": "extensive",
-      "peak_year": 2035,
-      "peak_co2": 791798.7743841552,
-      "peaked_within_horizon": false,
-      "note": "未在预测期内达峰"
+      "peak_year": 2024,
+      "peak_co2": 771647.0914465276,
+      "peaked_within_horizon": true,
+      "note": "已达峰"
     },
     {
       "scenario": "green_growth",
       "peak_year": 2029,
-      "peak_co2": 806136.4779387536,
+      "peak_co2": 855414.7187308572,
       "peaked_within_horizon": true,
       "note": "已达峰"
     },
     {
       "scenario": "low_carbon",
-      "peak_year": 2026,
-      "peak_co2": 792947.2907358385,
+      "peak_year": 2028,
+      "peak_co2": 820935.0200282318,
       "peaked_within_horizon": true,
       "note": "已达峰"
     }

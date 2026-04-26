@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List
+
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import numpy as np
 import pandas as pd
@@ -15,6 +18,8 @@ if str(SCRIPT_DIR) not in sys.path:
 	sys.path.insert(0, str(SCRIPT_DIR))
 
 from stirpat_ee_gru import PanelRidgeSTIRPAT
+
+EXCLUDED_PROVINCES = {"Tibet"}
 
 
 @dataclass
@@ -68,8 +73,6 @@ def prepare_dataframe(input_csv: Path) -> pd.DataFrame:
 		"CoalShare",
 		"Industry",
 		"Urbanization",
-		"HighwayMileage",
-		"PrivateCars",
 	}
 	missing = required_cols - set(df.columns)
 	if missing:
@@ -77,6 +80,7 @@ def prepare_dataframe(input_csv: Path) -> pd.DataFrame:
 
 	df = df.copy()
 	df["province"] = df["province"].astype(str)
+	df = df.loc[~df["province"].isin(EXCLUDED_PROVINCES)].copy()
 	df["year"] = df["year"].astype(int)
 	df = df.sort_values(["province", "year"], kind="stable").reset_index(drop=True)
 
@@ -85,7 +89,7 @@ def prepare_dataframe(input_csv: Path) -> pd.DataFrame:
 	df["CarbonIntensity"] = df["CO2"] / df["GDP"]
 	df["EnergyIntensity"] = df["Energy"] / df["GDP"]
 
-	for col in ["CO2", "GDP", "Population", "Energy", "PrivateCars", "pGDP", "CarbonIntensity"]:
+	for col in ["CO2", "GDP", "Population", "Energy", "pGDP", "CarbonIntensity"]:
 		df[f"log_{col}"] = np.log(df[col].clip(lower=1e-8))
 
 	province_levels = sorted(df["province"].unique().tolist())
@@ -107,7 +111,6 @@ def build_residual_target(
     "Industry",
     "Urbanization",
     "EnergyIntensity",    # 新：替代 CoalShare
-    "log_PrivateCars",
 	]
 	# 注意：删除了 CoalShare 和 log_CarbonIntensity
 
@@ -131,8 +134,6 @@ def make_windows(df: pd.DataFrame, cfg: BuildConfig) -> Dict[str, np.ndarray]:
     "EnergyIntensity",   # 替换原来的 CoalShare
     "Industry",
     "Urbanization",
-    "HighwayMileage",
-    "log_PrivateCars",
 	]
 	# 注意：删除了 log_CarbonIntensity，因为没有 CarbonIntensity 了
 

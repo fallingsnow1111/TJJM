@@ -1,10 +1,10 @@
 {
-  "panel_rows": 1020,
-  "province_count": 30,
+  "panel_rows": 1054,
+  "province_count": 31,
   "year_min": 1990,
   "year_max": 2023,
   "co2_source_counts": {
-    "MEIC_1990_2023": 1020
+    "MEIC_1990_2023": 1054
   },
   "lmdi_residual_abs_ratio_stats": {
     "mean": 2.200349888855916e-14,
@@ -16,60 +16,75 @@
     "CO2": 0.0,
     "GDP": 0.0,
     "Population": 0.0,
-    "Energy": 0.0,
-    "CoalTCE": 0.0,
-    "OilTCE": 0.0,
-    "GasTCE": 0.0,
-    "NonFossilTCE": 0.0,
-    "CoalShare": 0.0,
-    "OilShare": 0.0,
-    "GasShare": 0.0,
-    "NonFossilShare": 0.0,
+    "Energy": 0.03225806451612903,
+    "CoalTCE": 0.03225806451612903,
+    "OilTCE": 0.03225806451612903,
+    "GasTCE": 0.03225806451612903,
+    "NonFossilTCE": 0.03225806451612903,
+    "CoalShare": 0.03225806451612903,
+    "OilShare": 0.03225806451612903,
+    "GasShare": 0.03225806451612903,
+    "NonFossilShare": 0.03225806451612903,
     "Industry": 0.0,
     "Urbanization": 0.0,
+    "HighwayMileage": 0.0,
+    "PrivateCars": 0.0,
     "A": 0.0,
-    "B": 0.0,
-    "C": 0.0
+    "B": 0.03225806451612903,
+    "C": 0.03225806451612903
   },
   "gdp_source_counts": {
-    "Provincial_GDP_1949_2024_observed": 1020
+    "Provincial_GDP_1949_2024_observed": 1054
   },
   "population_source_counts": {
-    "Provincial_population_1949_2024_observed": 1019,
+    "Provincial_population_1949_2024_observed": 1053,
     "Provincial_population_log_interpolation": 1
   },
   "energy_source_counts": {
     "Provincial_energy_inventory_1997_2022_total_final_consumption_tce_converted": 776,
     "Provincial_energy_log_polynomial_fit": 240,
+    "NaN": 34,
     "Provincial_energy_log_interpolation": 4
   },
   "coal_share_source_counts": {
     "Provincial_coal_share_from_total_final_consumption_tce_converted": 776,
     "Provincial_coal_share_logit_polynomial_fit": 240,
+    "NaN": 34,
     "Provincial_coal_share_logit_interpolation": 4
   },
   "oil_share_source_counts": {
     "Provincial_oil_share_from_total_final_consumption_tce_converted": 776,
     "Provincial_oil_share_logit_polynomial_fit": 240,
+    "NaN": 34,
     "Provincial_oil_share_logit_interpolation": 4
   },
   "gas_share_source_counts": {
     "Provincial_gas_share_from_total_final_consumption_tce_converted": 724,
     "Provincial_gas_share_logit_polynomial_fit": 290,
+    "NaN": 34,
     "Provincial_gas_share_logit_interpolation": 6
   },
   "nonfossil_share_source_counts": {
     "Provincial_nonfossil_share_from_total_final_consumption_tce_converted": 775,
     "Provincial_nonfossil_share_logit_polynomial_fit": 240,
+    "NaN": 34,
     "Provincial_nonfossil_share_logit_interpolation": 5
   },
   "industry_source_counts": {
-    "Provincial_industry_share_1996_2024_observed": 809,
-    "Provincial_industry_logit_polynomial_fit": 211
+    "Provincial_industry_share_1996_2024_observed": 836,
+    "Provincial_industry_logit_polynomial_fit": 218
   },
   "urbanization_source_counts": {
-    "Provincial_urbanization_share_1990_2025_observed": 555,
-    "Provincial_urbanization_logit_polynomial_fit": 465
+    "Provincial_urbanization_share_1990_2025_observed": 573,
+    "Provincial_urbanization_logit_polynomial_fit": 481
+  },
+  "highway_mileage_source_counts": {
+    "Provincial_railway_mileage_1990_2024_used_as_highway_proxy": 1032,
+    "Provincial_highway_mileage_log_polynomial_fit": 22
+  },
+  "private_cars_source_counts": {
+    "Provincial_civil_car_1990_2024_used_as_private_cars_proxy": 1049,
+    "Provincial_private_cars_log_polynomial_fit": 5
   },
   "national_energy_validation_stats": {
     "overlap_year_count": 34,
@@ -87,6 +102,7 @@
     "National energy total series is used for macro validation only and is not used as provincial fill value.",
     "All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
     "No national fallback is used in this build.",
+    "HighwayMileage and PrivateCars are integrated from provincial transport dataset.",
     "Panel rows are always output in stable province-year order."
   ]
 }

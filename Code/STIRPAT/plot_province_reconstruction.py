@@ -15,6 +15,8 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from stirpat_ee_gru import EntityEmbeddingGRU
 
+EXCLUDED_PROVINCES = {"Tibet"}
+
 
 def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(
@@ -233,6 +235,9 @@ def main() -> None:
 		raise FileNotFoundError(f"Model checkpoint not found: {model_ckpt}")
 
 	df = pd.read_csv(input_csv)
+	if "province" in df.columns:
+		df["province"] = df["province"].astype(str)
+		df = df.loc[~df["province"].isin(EXCLUDED_PROVINCES)].copy()
 	npz_data = np.load(dataset_npz, allow_pickle=True)
 	model = load_model(model_ckpt=model_ckpt, device=device)
 

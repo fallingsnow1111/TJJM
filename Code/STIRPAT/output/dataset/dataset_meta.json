@@ -15,8 +15,7 @@
     "log_pGDP",
     "Industry",
     "Urbanization",
-    "EnergyIntensity",
-    "log_PrivateCars"
+    "EnergyIntensity"
   ],
   "num_provinces": 30,
   "year_range": [

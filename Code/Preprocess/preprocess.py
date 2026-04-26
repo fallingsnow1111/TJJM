@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -16,6 +16,7 @@ PROJECT_ROOT = PREPROCESS_DIR.parents[1]
 DATASET_ROOT = PROJECT_ROOT / "Raw"
 SUMMARY_JSON = PREPROCESS_DIR / "dataset_index_summary.json"
 OUT_DIR = PREPROCESS_DIR / "output"
+EXCLUDED_PROVINCES = {"Tibet"}
 
 
 # Conversion factors to standard coal equivalent (10^4 tce per original unit in inventory row).
@@ -232,6 +233,15 @@ def normalize_province_name(name: str) -> Optional[str]:
 		return ZH_PROVINCE_ALIAS[name]
 	compact = re.sub(r"[^A-Za-z]", "", name).lower()
 	return PROVINCE_ALIAS.get(compact)
+
+
+def exclude_provinces(df: pd.DataFrame, province_col: str = "province") -> pd.DataFrame:
+	"""Drop provinces that should be excluded from the modeling pipeline."""
+
+	if province_col not in df.columns:
+		return df
+	mask = ~df[province_col].astype(str).isin(EXCLUDED_PROVINCES)
+	return df.loc[mask].copy()
 
 
 def extract_year_from_text(text: str) -> Optional[int]:
@@ -1333,7 +1343,7 @@ def main() -> None:
 	log_progress(f"已加载数据索引，共 {len(items)} 个条目")
 
 	log_progress("阶段1/7：构建CO2主面板")
-	co2_panel = build_co2_panel(items)
+	co2_panel = exclude_provinces(build_co2_panel(items))
 	log_progress(f"CO2主面板完成，记录数 {len(co2_panel)}")
 
 	log_progress("阶段2/7：读取省级GDP与Population")
@@ -1406,28 +1416,6 @@ def main() -> None:
 	panel["GasTCE"] = pd.to_numeric(panel["Energy"], errors="coerce") * pd.to_numeric(panel["GasShare"], errors="coerce") / 100.0
 	panel["NonFossilTCE"] = pd.to_numeric(panel["Energy"], errors="coerce") * pd.to_numeric(panel["NonFossilShare"], errors="coerce") / 100.0
 
-	log_progress("阶段7/7：补全交通变量（HighwayMileage, PrivateCars）")
-	prov_transport = read_provincial_transport_mileage_and_private_cars(items)
-	log_observed_coverage("HighwayMileage", prov_transport, "HighwayMileage")
-	log_observed_coverage("PrivateCars", prov_transport, "PrivateCars")
-	if not prov_transport.empty:
-		panel = panel.merge(prov_transport, on=["province", "year"], how="left")
-	panel = ensure_metric_columns(panel, "HighwayMileage", include_imputed=True)
-	panel = ensure_metric_columns(panel, "PrivateCars", include_imputed=True)
-
-	panel = fill_positive_with_provincial_only(
-		panel,
-		value_col="HighwayMileage",
-		interpolation_source="Provincial_highway_mileage_log_interpolation",
-		polyfit_source="Provincial_highway_mileage_log_polynomial_fit",
-	)
-	panel = fill_positive_with_provincial_only(
-		panel,
-		value_col="PrivateCars",
-		interpolation_source="Provincial_private_cars_log_interpolation",
-		polyfit_source="Provincial_private_cars_log_polynomial_fit",
-	)
-
 	panel["A"] = panel["GDP"] / panel["Population"]
 	panel["B"] = panel["Energy"] / panel["GDP"]
 	panel["C"] = panel["CO2"] / panel["Energy"]
@@ -1437,7 +1425,7 @@ def main() -> None:
     "province", "year", "CO2", "GDP", "Population", "Energy",
     "CoalTCE", "OilTCE", "GasTCE", "NonFossilTCE",
     "CoalShare", "OilShare", "GasShare", "NonFossilShare",
-    "Industry", "Urbanization", "HighwayMileage", "PrivateCars",
+    "Industry", "Urbanization",
     "A", "B", "C", "EnergyIntensity",   # ← 加上它
     "CO2_source",
 	]
@@ -1499,8 +1487,6 @@ def main() -> None:
 				"NonFossilShare",
 				"Industry",
 				"Urbanization",
-				"HighwayMileage",
-				"PrivateCars",
 				"A",
 				"B",
 				"C",
@@ -1532,12 +1518,6 @@ def main() -> None:
 		"urbanization_source_counts": panel["Urbanization_source"].value_counts(dropna=False).to_dict()
 		if "Urbanization_source" in panel.columns
 		else {},
-		"highway_mileage_source_counts": panel["HighwayMileage_source"].value_counts(dropna=False).to_dict()
-		if "HighwayMileage_source" in panel.columns
-		else {},
-		"private_cars_source_counts": panel["PrivateCars_source"].value_counts(dropna=False).to_dict()
-		if "PrivateCars_source" in panel.columns
-		else {},
 		"national_energy_validation_stats": national_energy_validation_stats,
 		"notes": [
 			"CO2 uses MEIC provincial total emissions only (1990-2023).",
@@ -1547,7 +1527,6 @@ def main() -> None:
 			"National energy total series is used for macro validation only and is not used as provincial fill value.",
 			"All non-CO2 variables use provincial data only: in-province interpolation for internal gaps and polynomial fitting for leading/trailing gaps.",
 			"No national fallback is used in this build.",
-			"HighwayMileage and PrivateCars are integrated from provincial transport dataset.",
 			"Panel rows are always output in stable province-year order.",
 		],
 	}

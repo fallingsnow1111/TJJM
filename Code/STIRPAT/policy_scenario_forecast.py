@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import numpy as np
 import pandas as pd
@@ -16,6 +19,8 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from stirpat_ee_gru import EntityEmbeddingGRU, PanelRidgeSTIRPAT
+
+EXCLUDED_PROVINCES = {"Tibet"}
 
 
 @dataclass
@@ -105,6 +110,7 @@ class PathGenerator:
         t_start: int,
         ci_mid_adjust: float = 0.0,
         coal_mid_adjust: float = 0.0,
+        energy_early_adjust: float = 0.0,
         energy_mid_adjust: float = 0.0,
     ) -> None:
         t_peak = int(spec.target_peak_year)
@@ -123,6 +129,12 @@ class PathGenerator:
             if year < t_start:
                 ci = ci_early / 100.0
                 coal = coal_early
+                energy_rate = energy_rate + energy_early_adjust
+                if spec.require_peak:
+                    # Prevent immediate turn-down before the designed decarbonization start.
+                    ci = max(ci, -0.004)
+                    coal = max(coal, -0.35)
+                    energy_rate = energy_rate + 0.004
             elif year < t_peak:
                 ci = (ci_mid / 100.0) + ci_mid_adjust
                 coal = coal_mid + coal_mid_adjust
@@ -143,6 +155,7 @@ class PathGenerator:
         t_start_override: Optional[int] = None,
         ci_mid_adjust: float = 0.0,
         coal_mid_adjust: float = 0.0,
+        energy_early_adjust: float = 0.0,
         energy_mid_adjust: float = 0.0,
     ) -> Dict[str, Dict[int, float]]:
         annual = self._expand_phase_values(policy)
@@ -153,6 +166,7 @@ class PathGenerator:
             t_start=t_start,
             ci_mid_adjust=ci_mid_adjust,
             coal_mid_adjust=coal_mid_adjust,
+            energy_early_adjust=energy_early_adjust,
             energy_mid_adjust=energy_mid_adjust,
         )
         return annual
@@ -249,22 +263,23 @@ class Calibrator:
         scenario_name: str,
         initial_t_start: int,
         target_peak_year: int,
-        regenerate_paths: Callable[[int, float, float, float], Dict[str, Dict[int, float]]],
+        regenerate_paths: Callable[[int, float, float, float, float], Dict[str, Dict[int, float]]],
         simulate_once: Callable[[Dict[str, Dict[int, float]], int], pd.DataFrame],
         checker: ConstraintChecker,
     ) -> Tuple[Dict[str, Dict[int, float]], int, Dict[str, Any]]:
         t_start = int(initial_t_start)
         ci_mid_adjust = 0.0
         coal_mid_adjust = 0.0
+        energy_early_adjust = 0.0
         energy_mid_adjust = 0.0
-        paths = regenerate_paths(t_start, ci_mid_adjust, coal_mid_adjust, energy_mid_adjust)
+        paths = regenerate_paths(t_start, ci_mid_adjust, coal_mid_adjust, energy_early_adjust, energy_mid_adjust)
         history: List[Dict[str, Any]] = []
         best: Optional[Dict[str, Any]] = None
         peak_year = target_peak_year
         violations: List[str] = []
 
         for i in range(self.max_iter):
-            paths = regenerate_paths(t_start, ci_mid_adjust, coal_mid_adjust, energy_mid_adjust)
+            paths = regenerate_paths(t_start, ci_mid_adjust, coal_mid_adjust, energy_early_adjust, energy_mid_adjust)
             scenario_df = simulate_once(paths, t_start)
             national_df = (
                 scenario_df.groupby("year", as_index=False)[["co2_pred", "energy_pred"]]
@@ -290,6 +305,7 @@ class Calibrator:
                     "t_start": t_start,
                     "ci_mid_adjust": ci_mid_adjust,
                     "coal_mid_adjust": coal_mid_adjust,
+                    "energy_early_adjust": energy_early_adjust,
                     "energy_mid_adjust": energy_mid_adjust,
                     "violations": len(violations),
                 }
@@ -304,6 +320,7 @@ class Calibrator:
                     "violations": violations,
                     "ci_mid_adjust": ci_mid_adjust,
                     "coal_mid_adjust": coal_mid_adjust,
+                    "energy_early_adjust": energy_early_adjust,
                     "energy_mid_adjust": energy_mid_adjust,
                 }
 
@@ -315,6 +332,7 @@ class Calibrator:
                     "t_start": t_start,
                     "ci_mid_adjust": ci_mid_adjust,
                     "coal_mid_adjust": coal_mid_adjust,
+                    "energy_early_adjust": energy_early_adjust,
                     "energy_mid_adjust": energy_mid_adjust,
                     "violations": violations,
                     "history": history,
@@ -322,16 +340,18 @@ class Calibrator:
 
             if peak_year < target_peak_year:
                 t_start = min(t_start + 1, 2033)
-                ci_mid_adjust = min(ci_mid_adjust + 0.003, 0.02)
-                coal_mid_adjust = min(coal_mid_adjust + 0.10, 1.0)
+                ci_mid_adjust = min(ci_mid_adjust + 0.004, 0.03)
+                coal_mid_adjust = min(coal_mid_adjust + 0.15, 1.5)
+                energy_early_adjust = min(energy_early_adjust + 0.003, 0.04)
                 # Peak is too early: raise mid-stage energy growth to postpone peak.
-                energy_mid_adjust = min(energy_mid_adjust + 0.002, 0.02)
+                energy_mid_adjust = min(energy_mid_adjust + 0.003, 0.04)
             elif peak_year > target_peak_year:
                 t_start = max(t_start - 1, 2024)
-                ci_mid_adjust = max(ci_mid_adjust - 0.003, -0.02)
-                coal_mid_adjust = max(coal_mid_adjust - 0.10, -1.0)
+                ci_mid_adjust = max(ci_mid_adjust - 0.004, -0.03)
+                coal_mid_adjust = max(coal_mid_adjust - 0.15, -1.5)
+                energy_early_adjust = max(energy_early_adjust - 0.003, -0.04)
                 # Peak is too late: reduce mid-stage energy growth to advance peak.
-                energy_mid_adjust = max(energy_mid_adjust - 0.002, -0.02)
+                energy_mid_adjust = max(energy_mid_adjust - 0.003, -0.04)
 
         if best is None:
             best = {
@@ -342,6 +362,7 @@ class Calibrator:
                 "objective": float((peak_year - target_peak_year) ** 2),
                 "ci_mid_adjust": ci_mid_adjust,
                 "coal_mid_adjust": coal_mid_adjust,
+                "energy_early_adjust": energy_early_adjust,
                 "energy_mid_adjust": energy_mid_adjust,
             }
 
@@ -370,6 +391,7 @@ class Calibrator:
             "t_start": final_t_start,
             "ci_mid_adjust": float(best["ci_mid_adjust"]),
             "coal_mid_adjust": float(best["coal_mid_adjust"]),
+            "energy_early_adjust": float(best["energy_early_adjust"]),
             "energy_mid_adjust": float(best["energy_mid_adjust"]),
             "violations": final_violations,
             "history": history,
@@ -380,7 +402,6 @@ def build_scenario_policy() -> Dict[str, Dict[str, Dict[str, float]]]:
     base_shared = {
         "Population": {"2024_2025": 0.0005, "2026_2030": 0.0, "2031_2035": -0.0005},
         "Urbanization": {"2024_2025": 0.75, "2026_2030": 0.65, "2031_2035": 0.5},
-        "PrivateCars": {"2024_2025": 0.05, "2026_2030": 0.035, "2031_2035": 0.02},
     }
 
     baseline = {
@@ -389,7 +410,6 @@ def build_scenario_policy() -> Dict[str, Dict[str, Dict[str, float]]]:
         "OilShare": {"2024_2025": -0.15, "2026_2030": -0.10, "2031_2035": -0.10},
         "GasShare": {"2024_2025": 0.10, "2026_2030": 0.10, "2031_2035": 0.05},
         "Urbanization": dict(base_shared["Urbanization"]),
-        "PrivateCars": dict(base_shared["PrivateCars"]),
     }
 
     low_carbon = {
@@ -398,7 +418,6 @@ def build_scenario_policy() -> Dict[str, Dict[str, Dict[str, float]]]:
         "OilShare": {"2024_2025": -0.25, "2026_2030": -0.20, "2031_2035": -0.20},
         "GasShare": {"2024_2025": 0.15, "2026_2030": 0.15, "2031_2035": 0.10},
         "Urbanization": dict(base_shared["Urbanization"]),
-        "PrivateCars": dict(base_shared["PrivateCars"]),
     }
 
     extensive = {
@@ -407,7 +426,6 @@ def build_scenario_policy() -> Dict[str, Dict[str, Dict[str, float]]]:
         "OilShare": {"2024_2025": -0.05, "2026_2030": -0.02, "2031_2035": 0.0},
         "GasShare": {"2024_2025": 0.05, "2026_2030": 0.05, "2031_2035": 0.03},
         "Urbanization": dict(base_shared["Urbanization"]),
-        "PrivateCars": dict(base_shared["PrivateCars"]),
     }
 
     green_growth = {
@@ -416,16 +434,6 @@ def build_scenario_policy() -> Dict[str, Dict[str, Dict[str, float]]]:
         "OilShare": {"2024_2025": -0.25, "2026_2030": -0.20, "2031_2035": -0.20},
         "GasShare": {"2024_2025": 0.15, "2026_2030": 0.15, "2031_2035": 0.10},
         "Urbanization": dict(base_shared["Urbanization"]),
-        "PrivateCars": dict(base_shared["PrivateCars"]),
-    }
-
-    deep_decarb = {
-        "Population": dict(base_shared["Population"]),
-        "pGDP": {"2024_2025": 0.05, "2026_2030": 0.045, "2031_2035": 0.04},
-        "OilShare": {"2024_2025": -0.35, "2026_2030": -0.30, "2031_2035": -0.30},
-        "GasShare": {"2024_2025": 0.20, "2026_2030": 0.20, "2031_2035": 0.15},
-        "Urbanization": dict(base_shared["Urbanization"]),
-        "PrivateCars": dict(base_shared["PrivateCars"]),
     }
 
     return {
@@ -433,7 +441,6 @@ def build_scenario_policy() -> Dict[str, Dict[str, Dict[str, float]]]:
         "low_carbon": low_carbon,
         "extensive": extensive,
         "green_growth": green_growth,
-        "deep_decarb": deep_decarb,
     }
 
 def _safe_log(x: float) -> float:
@@ -490,40 +497,16 @@ def load_model(model_ckpt: Path, device: torch.device) -> Tuple[EntityEmbeddingG
     return model, shape_info
 
 
-def estimate_highway_growth(panel_df: pd.DataFrame) -> Dict[str, float]:
-    rates: Dict[str, float] = {}
-    for province, grp in panel_df.groupby("province", sort=False):
-        g = grp.sort_values("year", kind="stable")
-        recent = g[g["year"].between(2018, 2023)].copy()
-        if len(recent) < 2:
-            rates[province] = 0.0
-            continue
-
-        vals = recent["HighwayMileage"].to_numpy(dtype=float)
-        yoy: List[float] = []
-        for i in range(1, len(vals)):
-            prev = vals[i - 1]
-            curr = vals[i]
-            if prev > 1e-8:
-                yoy.append(curr / prev - 1.0)
-
-        if not yoy:
-            rates[province] = 0.0
-            continue
-
-        median_rate = float(np.median(yoy))
-        rates[province] = float(np.clip(median_rate, -0.05, 0.10))
-    return rates
-
-
 def prepare_base_data(cfg: ForecastConfig) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray, List[str], Dict[str, int]]:
     panel = pd.read_csv(cfg.panel_csv)
     panel["province"] = panel["province"].astype(str)
+    panel = panel.loc[~panel["province"].isin(EXCLUDED_PROVINCES)].copy()
     panel["year"] = panel["year"].astype(int)
     panel = panel.sort_values(["province", "year"], kind="stable").reset_index(drop=True)
 
     panel_res = pd.read_csv(cfg.panel_with_residual_csv)
     panel_res["province"] = panel_res["province"].astype(str)
+    panel_res = panel_res.loc[~panel_res["province"].isin(EXCLUDED_PROVINCES)].copy()
     panel_res["year"] = panel_res["year"].astype(int)
     panel_res = panel_res.sort_values(["province", "year"], kind="stable").reset_index(drop=True)
 
@@ -545,14 +528,13 @@ def fit_stirpat(panel_df: pd.DataFrame, train_end_year: int) -> PanelRidgeSTIRPA
     "Industry",
     "Urbanization",
     "EnergyIntensity",    # 新：替代 CoalShare
-    "log_PrivateCars",
     ]
     # 注意：删除了 CoalShare 和 log_CarbonIntensity
 
     df = panel_df.copy()
     df["pGDP"] = df["GDP"] / df["Population"]
     df["CarbonIntensity"] = df["CO2"] / df["GDP"]
-    for col in ["CO2", "GDP", "Population", "Energy", "PrivateCars", "pGDP", "CarbonIntensity"]:
+    for col in ["CO2", "GDP", "Population", "Energy", "pGDP", "CarbonIntensity"]:
         df[f"log_{col}"] = np.log(df[col].clip(lower=1e-8))
 
     ridge = PanelRidgeSTIRPAT(alpha=1.0)
@@ -570,7 +552,6 @@ def _build_row_for_next_year(
     policy: Dict[str, Dict[str, float]],
     annual_path: Optional[Dict[str, Dict[int, float]]],
     year: int,
-    highway_rate: float,
     start_year: int = 2024,      # 新增参数
 ) -> Dict[str, float]:
     phase = _phase_for_year(year)
@@ -596,7 +577,6 @@ def _build_row_for_next_year(
     gdp = population * pgdp
     energy = float(prev_row["Energy"]) * (1.0 + energy_growth)
     carbon_intensity = float(prev_row["CarbonIntensity"]) * (1.0 + carbon_intensity_rate)
-    private_cars = float(prev_row["PrivateCars"]) * (1.0 + policy["PrivateCars"][phase])
 
     # ---- 过渡逻辑：2024 年沿用上一年能源结构，避免突变 ----
     if year == start_year:
@@ -616,7 +596,6 @@ def _build_row_for_next_year(
 
     industry = _clip_pct(float(prev_row["Industry"]) + industry_delta)
     urbanization = _clip_pct(float(prev_row["Urbanization"]) + urbanization_delta)
-    highway = max(float(prev_row["HighwayMileage"]) * (1.0 + highway_rate), 1e-8)
 
     energy_intensity = max(float(prev_row["EnergyIntensity"]) * (1.0 + energy_intensity_rate), 1e-8)
 
@@ -634,14 +613,11 @@ def _build_row_for_next_year(
         "Industry": industry,
         "Urbanization": urbanization,
         "CarbonIntensity": carbon_intensity,    # 保留，但不作为 STIRPAT 输入
-        "PrivateCars": private_cars,
-        "HighwayMileage": highway,
         "log_Population": _safe_log(population),
         "log_pGDP": _safe_log(pgdp),
         "log_GDP": _safe_log(gdp),
         "log_Energy": _safe_log(energy),
         "log_CarbonIntensity": _safe_log(carbon_intensity),  # 保留
-        "log_PrivateCars": _safe_log(private_cars),
     }
 
 
@@ -676,7 +652,6 @@ def forecast_scenario(
     ridge: PanelRidgeSTIRPAT,
     model: EntityEmbeddingGRU,
     province_to_id: Dict[str, int],
-    highway_growth: Dict[str, float],
     mean: np.ndarray,
     std: np.ndarray,
     gru_cols: List[str],
@@ -710,21 +685,17 @@ def forecast_scenario(
         "Industry",
         "Urbanization",
         "CarbonIntensity",
-        "PrivateCars",
-        "HighwayMileage",
         "log_Population",
         "log_pGDP",
         "log_GDP",
         "log_Energy",
         "log_CarbonIntensity",
-        "log_PrivateCars",
         "residual",
     ]].copy()
 
     for province, grp in hist.groupby("province", sort=False):
         g = grp.sort_values("year", kind="stable").copy()
         pid = province_to_id[province]
-        hwy_rate = highway_growth.get(province, 0.0)
 
         for year in range(cfg.start_year, cfg.end_year + 1):
             prev = g.iloc[-1]
@@ -733,7 +704,6 @@ def forecast_scenario(
                 policy=policy,
                 annual_path=annual_path,
                 year=year,
-                highway_rate=hwy_rate,
                 start_year=cfg.start_year,
             )
 
@@ -745,7 +715,6 @@ def forecast_scenario(
                     "Industry": [row["Industry"]],
                     "Urbanization": [row["Urbanization"]],
                     "EnergyIntensity": [row["EnergyIntensity"]],    # 替换原来的 "CoalShare"
-                    "log_PrivateCars": [row["log_PrivateCars"]],
                 }
             )
             stirpat_log_energy = float(ridge.predict(stirpat_input, province_col="province")[0])
@@ -775,7 +744,7 @@ def forecast_scenario(
             # This avoids an immediate peak without reintroducing hard floors.
             if require_peak and year <= (target_peak_year - 1):
                 policy_energy = float(row["Energy"])
-                w_policy = 0.35 if year <= (t_start + 1) else 0.20
+                w_policy = 0.60 if year <= (t_start + 1) else 0.35
                 energy_pred = float((1.0 - w_policy) * energy_pred + w_policy * policy_energy)
 
             hybrid_log_energy = _safe_log(energy_pred)
@@ -1046,7 +1015,6 @@ def main() -> None:
 
     panel_df, panel_res_df, mean, std, gru_cols, province_to_id = prepare_base_data(cfg)
     ridge = fit_stirpat(panel_df=panel_df, train_end_year=cfg.train_end_year)
-    highway_growth = estimate_highway_growth(panel_df)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, shape_info = load_model(cfg.model_ckpt, device)
@@ -1061,41 +1029,36 @@ def main() -> None:
     checker = ConstraintChecker(start_year=cfg.start_year, end_year=cfg.end_year)
     calibrator = Calibrator()
     scenario_specs: Dict[str, ScenarioPeakSpec] = {
+        # Interpretation for thesis:
+        # 1) low_carbon: lower energy growth + stronger structure/technology decarbonization.
+        # 2) baseline: medium growth + medium decarbonization.
+        # 3) green_growth: higher growth + medium-strong decarbonization, so peak is not earlier than baseline.
         "baseline": ScenarioPeakSpec(
-            target_peak_year=2029,
+            target_peak_year=2030,
             require_peak=True,
-            t_start=2026,
-            energy=(2.5, 1.8, 1.0),
-            carbon_intensity=(-2.0, -2.8, -2.2),
-            coal_share=(-1.2, -1.5, -1.0),
+            t_start=2029,
+            energy=(3.2, 2.5, 1.3),
+            carbon_intensity=(-1.2, -2.7, -2.5),
+            coal_share=(-0.6, -1.6, -1.2),
             industry=(-1.2, -0.8),
         ),
         "low_carbon": ScenarioPeakSpec(
-            target_peak_year=2027,
+            target_peak_year=2029,
             require_peak=True,
-            t_start=2025,
-            energy=(2.3, 1.6, 0.8),
-            carbon_intensity=(-2.5, -3.5, -2.8),
-            coal_share=(-1.5, -2.0, -1.5),
+            t_start=2028,
+            energy=(3.0, 2.3, 1.0),
+            carbon_intensity=(-1.5, -3.0, -2.8),
+            coal_share=(-0.8, -1.9, -1.5),
             industry=(-1.5, -1.1),
         ),
         "green_growth": ScenarioPeakSpec(
             target_peak_year=2030,
             require_peak=True,
             t_start=2027,
-            energy=(2.7, 2.0, 1.2),
-            carbon_intensity=(-2.0, -3.0, -2.5),
-            coal_share=(-1.2, -1.8, -1.2),
+            energy=(3.4, 2.7, 1.5),
+            carbon_intensity=(-1.3, -2.8, -2.5),
+            coal_share=(-0.6, -1.7, -1.2),
             industry=(-1.3, -1.0),
-        ),
-        "deep_decarb": ScenarioPeakSpec(
-            target_peak_year=2028,
-            require_peak=False,
-            t_start=2027,
-            energy=(2.4, 1.5, 0.6),
-            carbon_intensity=(-2.0, -4.0, -3.5),
-            coal_share=(-1.0, -3.0, -2.5),
-            industry=(-1.5, -1.2),
         ),
         "extensive": ScenarioPeakSpec(
             target_peak_year=2034,
@@ -1132,7 +1095,6 @@ def main() -> None:
                 ridge=ridge,
                 model=model,
                 province_to_id=province_to_id,
-                highway_growth=highway_growth,
                 mean=mean,
                 std=std,
                 gru_cols=gru_cols,
@@ -1146,6 +1108,7 @@ def main() -> None:
                 t_start: int,
                 ci_mid_adjust: float,
                 coal_mid_adjust: float,
+                energy_early_adjust: float,
                 energy_mid_adjust: float,
             ) -> Dict[str, Dict[int, float]]:
                 return path_generator.generate_paths(
@@ -1154,6 +1117,7 @@ def main() -> None:
                     t_start_override=t_start,
                     ci_mid_adjust=ci_mid_adjust,
                     coal_mid_adjust=coal_mid_adjust,
+                    energy_early_adjust=energy_early_adjust,
                     energy_mid_adjust=energy_mid_adjust,
                 )
 
@@ -1183,6 +1147,7 @@ def main() -> None:
                 "t_start_final": int(rule["t_start"]),
                 "ci_mid_adjust": 0.0,
                 "coal_mid_adjust": 0.0,
+                "energy_early_adjust": 0.0,
                 "energy_mid_adjust": 0.0,
                 "violations": [],
                 "history": [],

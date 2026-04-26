@@ -324,12 +324,14 @@ class Calibrator:
                 t_start = min(t_start + 1, 2033)
                 ci_mid_adjust = min(ci_mid_adjust + 0.003, 0.02)
                 coal_mid_adjust = min(coal_mid_adjust + 0.10, 1.0)
-                energy_mid_adjust = max(energy_mid_adjust - 0.002, -0.02)
+                # Peak is too early: raise mid-stage energy growth to postpone peak.
+                energy_mid_adjust = min(energy_mid_adjust + 0.002, 0.02)
             elif peak_year > target_peak_year:
                 t_start = max(t_start - 1, 2024)
                 ci_mid_adjust = max(ci_mid_adjust - 0.003, -0.02)
                 coal_mid_adjust = max(coal_mid_adjust - 0.10, -1.0)
-                energy_mid_adjust = min(energy_mid_adjust + 0.002, 0.02)
+                # Peak is too late: reduce mid-stage energy growth to advance peak.
+                energy_mid_adjust = max(energy_mid_adjust - 0.002, -0.02)
 
         if best is None:
             best = {
@@ -768,6 +770,13 @@ def forecast_scenario(
             energy_model_pred = float(np.exp(hybrid_log_energy))
             prev_energy = float(prev["Energy"])
             energy_pred = float(energy_inertia_alpha * prev_energy + (1.0 - energy_inertia_alpha) * energy_model_pred)
+
+            # Softly align with policy trajectory before target peak year.
+            # This avoids an immediate peak without reintroducing hard floors.
+            if require_peak and year <= (target_peak_year - 1):
+                policy_energy = float(row["Energy"])
+                w_policy = 0.35 if year <= (t_start + 1) else 0.20
+                energy_pred = float((1.0 - w_policy) * energy_pred + w_policy * policy_energy)
 
             hybrid_log_energy = _safe_log(energy_pred)
             co2_pred = _co2_from_ipcc(

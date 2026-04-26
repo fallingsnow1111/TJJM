@@ -1,0 +1,9 @@
+{
+  "peak_year": 2035,
+  "peaked_within_forecast": false,
+  "scenario": "baseline",
+  "national_co2_at_peak": 13503.588452438898,
+  "forecast_start_year": 2024,
+  "forecast_end_year": 2035,
+  "province_count": 30
+}

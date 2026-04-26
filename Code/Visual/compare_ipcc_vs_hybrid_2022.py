@@ -59,6 +59,8 @@ IPCC_COEF = {
     "non_fossil": 0.0,
 }
 
+DEFAULT_EXCLUDED_PROVINCES = ["InnerMongolia", "Shanxi", "Ningxia"]
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -102,6 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="total_consumption",
         choices=["total_consumption", "total_final_consumption"],
         help="Energy inventory row used by IPCC method",
+    )
+    parser.add_argument(
+        "--exclude-provinces",
+        default=",".join(DEFAULT_EXCLUDED_PROVINCES),
+        help="Comma-separated province names to exclude from final comparison/plot",
     )
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"], help="Inference device")
     return parser
@@ -194,7 +201,7 @@ def read_ipcc_2022(energy_inventory_xlsx: Path, year: int, energy_row_mode: str)
     if not year_from_file or int(year_from_file.group(1)) != year:
         raise ValueError(f"Energy inventory file year does not match --year={year}: {energy_inventory_xlsx.name}")
 
-    wb = load_workbook(energy_inventory_xlsx, read_only=True, data_only=True)
+    wb = load_workbook(energy_inventory_xlsx, read_only=False, data_only=True)
     rows: list[dict[str, float | str]] = []
 
     def _calc_from_row(ws, row_idx: int) -> dict[str, float]:
@@ -204,11 +211,14 @@ def read_ipcc_2022(energy_inventory_xlsx: Path, year: int, energy_row_mode: str)
         non_fossil_tce = 0.0
 
         max_col = int(ws.max_column or 0)
+        has_effective_value = False
+
         for c in range(2, max_col + 1):
             header = ws.cell(row=1, column=c).value
             if not isinstance(header, str):
                 continue
             header = header.strip()
+
             factor = ENERGY_TCE_FACTOR.get(header)
             if factor is None:
                 continue
@@ -216,24 +226,28 @@ def read_ipcc_2022(energy_inventory_xlsx: Path, year: int, energy_row_mode: str)
             v = ws.cell(row=row_idx, column=c).value
             if not isinstance(v, (int, float, np.integer, np.floating)):
                 continue
+
             v_float = float(v)
             if not np.isfinite(v_float):
                 continue
 
             contrib_tce = v_float * float(factor)
+            has_effective_value = True
+
             if header in COAL_FUEL_HEADERS:
                 coal_tce += contrib_tce
             elif header in OIL_FUEL_HEADERS:
                 oil_tce += contrib_tce
             elif header in GAS_FUEL_HEADERS:
                 gas_tce += contrib_tce
-            elif header in NON_FOSSIL_HEADERS:
-                non_fossil_tce += contrib_tce
             else:
+                # 电力、热力、其他能源，以及未显式分类但已纳入折标系数的能源
+                # 都计入总能耗分母，但不进入化石燃料排放分子
                 non_fossil_tce += contrib_tce
 
         total_tce = coal_tce + oil_tce + gas_tce + non_fossil_tce
-        if total_tce <= 0:
+
+        if not has_effective_value or total_tce <= 0:
             return {
                 "ok": 0.0,
                 "ipcc_co2": np.nan,
@@ -249,6 +263,8 @@ def read_ipcc_2022(energy_inventory_xlsx: Path, year: int, energy_row_mode: str)
         gas_share = 100.0 * gas_tce / total_tce
         non_share = 100.0 * non_fossil_tce / total_tce
 
+        # 沿用你原来的 IPCC 口径
+        # 只有煤炭、石油、天然气进入排放核算
         ipcc_co2_mt = (
             (coal_tce * IPCC_COEF["coal"] + oil_tce * IPCC_COEF["oil"] + gas_tce * IPCC_COEF["gas"])
             * (44.0 / 12.0)
@@ -303,10 +319,12 @@ def read_ipcc_2022(energy_inventory_xlsx: Path, year: int, energy_row_mode: str)
 
             row_total = row_map.get("total consumption")
             row_final = row_map.get("total final consumption")
+
             selected_row = None
             row_label = None
             fallback_flag = 0
             fallback_reason = ""
+
             if energy_row_mode == "total_consumption":
                 if row_total is not None:
                     payload_total = _calc_from_row(ws, row_total)
@@ -317,8 +335,6 @@ def read_ipcc_2022(energy_inventory_xlsx: Path, year: int, energy_row_mode: str)
                         fallback_reason = "total_consumption_invalid"
                         payload = _calc_from_row(ws, row_final) if row_final is not None else payload_total
                     elif _is_nonphysical_shares(payload_total):
-                        # Total Consumption may include negative balance terms for some provinces.
-                        # Fall back to Total Final Consumption to avoid non-physical shares.
                         selected_row = row_final
                         row_label = "Total Final Consumption"
                         fallback_flag = 1
@@ -369,6 +385,7 @@ def read_ipcc_2022(energy_inventory_xlsx: Path, year: int, energy_row_mode: str)
     out = pd.DataFrame(rows)
     if out.empty:
         raise RuntimeError("No valid province records parsed from energy inventory.")
+
     return out.sort_values("province", kind="stable").drop_duplicates(["province"], keep="last")
 
 
@@ -550,6 +567,13 @@ def main() -> None:
     if compare_df.empty:
         raise RuntimeError("No overlapping provinces between hybrid output and IPCC inventory.")
 
+    excluded = [x.strip() for x in str(args.exclude_provinces).split(",") if x.strip()]
+    if excluded:
+        compare_df = compare_df.loc[~compare_df["province"].isin(excluded)].copy()
+
+    if compare_df.empty:
+        raise RuntimeError("All provinces were excluded; no data left for plotting.")
+
     compare_df["hybrid_abs_err"] = (compare_df["hybrid_co2"] - compare_df["actual_co2"]).abs()
     compare_df["ipcc_abs_err"] = (compare_df["ipcc_co2"] - compare_df["actual_co2"]).abs()
     compare_df["hybrid_ape_pct"] = compare_df["hybrid_abs_err"] / np.maximum(compare_df["actual_co2"].abs(), 1e-6) * 100.0
@@ -576,6 +600,7 @@ def main() -> None:
     print(f"Saved metrics json: {out_json}")
     print(f"Saved figure:       {out_png}")
     print(f"IPCC energy row mode: {args.ipcc_energy_row}")
+    print(f"Excluded provinces: {excluded}")
     print(f"Panel provinces={panel_n}, IPCC inventory provinces={ipcc_n}, overlap={overlap_n}")
     print("Note: current data provide 30 provinces; Tibet is not available in panel/inventory.")
     print(

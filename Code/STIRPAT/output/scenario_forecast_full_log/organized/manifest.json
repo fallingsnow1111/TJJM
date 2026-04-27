@@ -1,0 +1,14 @@
+{
+  "description": "Organized scenario forecast package",
+  "year_range": [
+    2024,
+    2035
+  ],
+  "files": {
+    "combined_long": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast_full_log\\organized\\00_combined_long.csv",
+    "province_yearly_detail": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast_full_log\\organized\\01_province_yearly_detail.csv",
+    "province_peak_summary": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast_full_log\\organized\\02_province_peak_summary.csv",
+    "national_yearly": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast_full_log\\organized\\03_national_yearly.csv",
+    "national_peak_summary": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\scenario_forecast_full_log\\organized\\04_national_peak_summary.csv"
+  }
+}

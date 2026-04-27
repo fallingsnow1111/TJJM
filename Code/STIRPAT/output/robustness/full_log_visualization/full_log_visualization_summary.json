@@ -1,0 +1,207 @@
+{
+  "config": {
+    "input_csv": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\Preprocess\\output\\panel_master.csv",
+    "out_dir": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization",
+    "train_end_year": 2020,
+    "valid_start_year": 2021,
+    "valid_end_year": 2023,
+    "future_start_year": 2024,
+    "future_end_year": 2035,
+    "window": 3,
+    "ridge_alpha": 1.0,
+    "batch_size": 64,
+    "epochs": 120,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "embed_dim": 8,
+    "hidden_dim": 32,
+    "dropout": 0.2,
+    "patience": 15,
+    "max_grad_norm": 1.0,
+    "seed": 42,
+    "recent_growth_years": 5,
+    "provinces_per_figure": 9
+  },
+  "train_meta": {
+    "best_epoch": 17,
+    "best_valid_loss": 0.00015072189174437274,
+    "history": [
+      {
+        "epoch": 1.0,
+        "train_loss": 0.005594362566868464,
+        "valid_loss": 0.0010330869790373576
+      },
+      {
+        "epoch": 2.0,
+        "train_loss": 0.003670893543000732,
+        "valid_loss": 0.0006161157235813638
+      },
+      {
+        "epoch": 3.0,
+        "train_loss": 0.0026606079723153794,
+        "valid_loss": 0.00031137812248845066
+      },
+      {
+        "epoch": 4.0,
+        "train_loss": 0.0022500528843097745,
+        "valid_loss": 0.0003033081082523697
+      },
+      {
+        "epoch": 5.0,
+        "train_loss": 0.0019878290150137177,
+        "valid_loss": 0.00022227185804189907
+      },
+      {
+        "epoch": 6.0,
+        "train_loss": 0.0016757114047539377,
+        "valid_loss": 0.00022889720114310167
+      },
+      {
+        "epoch": 7.0,
+        "train_loss": 0.0014748801987263418,
+        "valid_loss": 0.00024742770474404094
+      },
+      {
+        "epoch": 8.0,
+        "train_loss": 0.0013432587785202833,
+        "valid_loss": 0.00031919429085165674
+      },
+      {
+        "epoch": 9.0,
+        "train_loss": 0.0012420468448129083,
+        "valid_loss": 0.00019600240565422508
+      },
+      {
+        "epoch": 10.0,
+        "train_loss": 0.000986462234452899,
+        "valid_loss": 0.0002583228572297634
+      },
+      {
+        "epoch": 11.0,
+        "train_loss": 0.0008937596908903547,
+        "valid_loss": 0.00022878352901898325
+      },
+      {
+        "epoch": 12.0,
+        "train_loss": 0.0007391404235802059,
+        "valid_loss": 0.0001943700031713686
+      },
+      {
+        "epoch": 13.0,
+        "train_loss": 0.0007512728273425074,
+        "valid_loss": 0.000231125031132251
+      },
+      {
+        "epoch": 14.0,
+        "train_loss": 0.0005965437751174683,
+        "valid_loss": 0.0002375493624842622
+      },
+      {
+        "epoch": 15.0,
+        "train_loss": 0.000552372245251068,
+        "valid_loss": 0.00020292822446208448
+      },
+      {
+        "epoch": 16.0,
+        "train_loss": 0.0005187195506767326,
+        "valid_loss": 0.00019036911770753149
+      },
+      {
+        "epoch": 17.0,
+        "train_loss": 0.0004509749675413505,
+        "valid_loss": 0.00015072189174437274
+      },
+      {
+        "epoch": 18.0,
+        "train_loss": 0.00040619521390735394,
+        "valid_loss": 0.00015471282984233565
+      },
+      {
+        "epoch": 19.0,
+        "train_loss": 0.00036540198842495945,
+        "valid_loss": 0.00017944668054244379
+      },
+      {
+        "epoch": 20.0,
+        "train_loss": 0.00034791181484858196,
+        "valid_loss": 0.00015788646511888754
+      },
+      {
+        "epoch": 21.0,
+        "train_loss": 0.0003341997269585374,
+        "valid_loss": 0.0001810270972782746
+      },
+      {
+        "epoch": 22.0,
+        "train_loss": 0.00029877294617195035,
+        "valid_loss": 0.00017493344203103333
+      },
+      {
+        "epoch": 23.0,
+        "train_loss": 0.00027797534795744077,
+        "valid_loss": 0.00017715109473404785
+      },
+      {
+        "epoch": 24.0,
+        "train_loss": 0.00025603053398386,
+        "valid_loss": 0.0001922336840329485
+      },
+      {
+        "epoch": 25.0,
+        "train_loss": 0.00022577504610775837,
+        "valid_loss": 0.0001864502216146017
+      },
+      {
+        "epoch": 26.0,
+        "train_loss": 0.00022978430802357338,
+        "valid_loss": 0.00018750829104748038
+      },
+      {
+        "epoch": 27.0,
+        "train_loss": 0.0002107445990467178,
+        "valid_loss": 0.0001592772142935751
+      },
+      {
+        "epoch": 28.0,
+        "train_loss": 0.00020541862537530028,
+        "valid_loss": 0.00019963052990432415
+      },
+      {
+        "epoch": 29.0,
+        "train_loss": 0.00019062542012848315,
+        "valid_loss": 0.0001638260545506556
+      },
+      {
+        "epoch": 30.0,
+        "train_loss": 0.00015956909656302914,
+        "valid_loss": 0.0001570170308696106
+      },
+      {
+        "epoch": 31.0,
+        "train_loss": 0.00016538763136070755,
+        "valid_loss": 0.00015080154828158105
+      },
+      {
+        "epoch": 32.0,
+        "train_loss": 0.0001525868222372429,
+        "valid_loss": 0.00016062074460529
+      }
+    ]
+  },
+  "outputs": {
+    "historical_detail": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\full_log_historical_detail.csv",
+    "historical_national": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\full_log_historical_national.csv",
+    "future_detail": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\full_log_future_detail.csv",
+    "future_national": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\full_log_future_national.csv",
+    "fig_national_historical": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\fig_full_log_national_historical_compare.png",
+    "fig_national_future": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\fig_full_log_national_future_forecast.png",
+    "fig_province_future_top12": "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\fig_full_log_province_future_top12.png",
+    "fig_province_historical_grouped": [
+      "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\province_historical_compare_01.png",
+      "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\province_historical_compare_02.png",
+      "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\province_historical_compare_03.png",
+      "C:\\Users\\13825\\Desktop\\杂七杂八\\统计建模\\TJJM\\Code\\STIRPAT\\output\\robustness\\full_log_visualization\\province_historical_compare_04.png"
+    ]
+  },
+  "note": "Historical CO2 predictions use observed CO2/Energy ratio at each year. Future CO2 predictions use province-specific recent average CO2/Energy ratio and recursively forecasted Energy."
+}

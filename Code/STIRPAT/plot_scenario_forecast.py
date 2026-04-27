@@ -220,12 +220,10 @@ def plot_trend_with_peak(
     for scenario, grp in national_df.groupby("scenario", sort=False):
         g = grp.sort_values("year", kind="stable")
         st = _scenario_style(scenario)
+
+        # Draw raw forecast values from CSV without historical-value anchoring.
         plot_g = g.copy()
-        align_factor = _national_alignment_factor(
-            history_national_df=history_national_df,
-            forecast_df=g,
-        )
-        plot_g["co2_pred"] = pd.to_numeric(plot_g["co2_pred"], errors="coerce") * align_factor
+        plot_g["co2_pred"] = pd.to_numeric(plot_g["co2_pred"], errors="coerce")
 
         if history_national_df is not None and not history_national_df.empty and not plot_g.empty:
             hist_last = history_national_df.sort_values("year", kind="stable").iloc[-1]
@@ -436,6 +434,9 @@ def plot_province_panels_grouped(
                     continue
                 st = _scenario_style(scenario)
                 plot_s = s.copy()
+                # Province panel figures only:
+                # visually align each province-scenario forecast to the province's 2023 historical CO2.
+                # This only affects the plotted province panels, not CSV results or national peak results.
                 align_factor = _province_alignment_factor(
                     history_df=history_df,
                     province=province,
@@ -444,7 +445,7 @@ def plot_province_panels_grouped(
                 plot_s["co2_pred"] = pd.to_numeric(plot_s["co2_pred"], errors="coerce") * align_factor
                 if history_df is not None and not history_df.empty:
                     hp = history_df[history_df["province"] == province].sort_values("year", kind="stable")
-                    if not hp.empty:
+                    if not hp.empty and not plot_s.empty:
                         hist_last = hp.iloc[-1]
                         _add_transition_segment(
                             ax=ax,
@@ -505,6 +506,17 @@ def main() -> None:
     detail_df = _exclude_provinces(pd.read_csv(args.detail_csv))
     national_df = pd.read_csv(args.national_csv)
     peak_df = pd.read_csv(args.peak_csv)
+
+    print(f"Reading national CSV from: {args.national_csv}")
+    print(f"Reading detail CSV from: {args.detail_csv}")
+    print("National forecast preview:")
+    print(
+        national_df
+        .sort_values(["scenario", "year"], kind="stable")
+        .groupby("scenario", sort=False)
+        .head(3)[["scenario", "year", "co2_pred"]]
+        .to_string(index=False)
+    )
 
     required_history = {"province", "year", "CO2"}
     required_detail = {"scenario", "province", "year", "co2_pred"}

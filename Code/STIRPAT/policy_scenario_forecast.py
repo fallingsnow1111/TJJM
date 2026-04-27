@@ -36,6 +36,8 @@ class ForecastConfig:
     train_end_year: int = 2020
     national_validation_csv: Path = SCRIPT_DIR.parent / "Preprocess" / "output" / "national_energy_validation.csv"
     calibration_year_window: int = 5
+    co2_anchor_year: int = 2023
+    min_start_co2_growth: float = 0.0
 
 
 IPCC_EF_TCO2_PER_TCE = {
@@ -852,6 +854,138 @@ def apply_energy_calibration(forecast_df: pd.DataFrame, factor: float) -> pd.Dat
     return out
 
 
+def estimate_co2_level_calibration_factor(
+    historical_df: pd.DataFrame,
+    anchor_year: int,
+) -> Tuple[float, Dict[str, Any]]:
+    """
+    Use historical CO2 in anchor year versus IPCC-implied CO2 ratio
+    to calibrate prediction-period CO2 level to historical accounting scale.
+    """
+    required = {"year", "CO2", "Energy", "CoalShare", "OilShare", "GasShare"}
+    missing = required - set(historical_df.columns)
+    if missing:
+        return 1.0, {
+            "enabled": False,
+            "reason": f"missing columns: {sorted(missing)}",
+            "factor": 1.0,
+        }
+
+    hist = historical_df.copy()
+    hist["year"] = hist["year"].astype(int)
+    anchor = hist[hist["year"] == int(anchor_year)].copy()
+
+    if anchor.empty:
+        return 1.0, {
+            "enabled": False,
+            "reason": f"anchor year {anchor_year} not found",
+            "factor": 1.0,
+        }
+
+    actual_co2 = float(anchor["CO2"].sum())
+    ipcc_co2 = 0.0
+    for _, row in anchor.iterrows():
+        ipcc_co2 += _co2_from_ipcc(
+            energy=float(row["Energy"]),
+            coal_share=float(row["CoalShare"]),
+            oil_share=float(row["OilShare"]),
+            gas_share=float(row["GasShare"]),
+        )
+
+    if not np.isfinite(actual_co2) or not np.isfinite(ipcc_co2) or ipcc_co2 <= 0.0:
+        return 1.0, {
+            "enabled": False,
+            "reason": "invalid actual/ipcc CO2",
+            "actual_co2": actual_co2,
+            "ipcc_co2": ipcc_co2,
+            "factor": 1.0,
+        }
+
+    factor = actual_co2 / ipcc_co2
+    return factor, {
+        "enabled": True,
+        "anchor_year": int(anchor_year),
+        "actual_co2": actual_co2,
+        "ipcc_co2": ipcc_co2,
+        "factor": factor,
+    }
+
+
+def apply_co2_level_calibration(forecast_df: pd.DataFrame, factor: float) -> pd.DataFrame:
+    out = forecast_df.copy()
+    out["co2_pred_raw_before_level_calibration"] = out["co2_pred"]
+    out["co2_pred"] = out["co2_pred_raw_before_level_calibration"] * float(factor)
+    return out
+
+
+def enforce_start_year_co2_above_anchor(
+    forecast_df: pd.DataFrame,
+    historical_df: pd.DataFrame,
+    start_year: int,
+    anchor_year: int,
+    min_growth: float = 0.0,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    required_hist = {"year", "CO2"}
+    missing_hist = required_hist - set(historical_df.columns)
+    if missing_hist:
+        return forecast_df.copy(), {
+            "enabled": False,
+            "reason": f"historical df missing columns: {sorted(missing_hist)}",
+        }
+
+    hist = historical_df.copy()
+    hist["year"] = hist["year"].astype(int)
+    anchor = hist[hist["year"] == int(anchor_year)]
+    if anchor.empty:
+        return forecast_df.copy(), {
+            "enabled": False,
+            "reason": f"anchor year {anchor_year} not found",
+        }
+
+    anchor_co2 = float(anchor["CO2"].sum())
+    target_start_co2 = anchor_co2 * (1.0 + float(min_growth))
+
+    out = forecast_df.copy()
+    out["co2_floor_multiplier"] = 1.0
+
+    meta: Dict[str, Any] = {
+        "enabled": True,
+        "anchor_year": int(anchor_year),
+        "start_year": int(start_year),
+        "anchor_co2": anchor_co2,
+        "min_growth": float(min_growth),
+        "target_start_co2": target_start_co2,
+        "scenario_adjustments": {},
+    }
+
+    for scenario_name, _ in out.groupby("scenario", sort=False):
+        start_mask = (out["scenario"] == scenario_name) & (out["year"] == int(start_year))
+        start_co2 = float(out.loc[start_mask, "co2_pred"].sum())
+
+        if start_co2 <= 0.0 or not np.isfinite(start_co2):
+            multiplier = 1.0
+            reason = "invalid_start_co2"
+        elif start_co2 < target_start_co2:
+            multiplier = target_start_co2 / start_co2
+            reason = "raised_to_anchor_floor"
+        else:
+            multiplier = 1.0
+            reason = "already_above_anchor"
+
+        scenario_mask = out["scenario"] == scenario_name
+        out.loc[scenario_mask, "co2_pred"] = out.loc[scenario_mask, "co2_pred"] * multiplier
+        out.loc[scenario_mask, "co2_floor_multiplier"] = multiplier
+
+        meta["scenario_adjustments"][scenario_name] = {
+            "start_co2_before": start_co2,
+            "start_co2_after": start_co2 * multiplier,
+            "multiplier": multiplier,
+            "reason": reason,
+        }
+
+    return out, meta
+
+
 def extract_final_policy_paths(paths: Dict[str, Dict[int, float]]) -> Dict[str, Dict[str, float]]:
     phase_ranges: Dict[str, Tuple[int, int]] = {
         "2024_2027": (2024, 2027),
@@ -993,6 +1127,16 @@ def parse_args() -> ForecastConfig:
         default=base.parent / "Preprocess" / "output" / "national_energy_validation.csv",
     )
     parser.add_argument("--calibration-year-window", type=int, default=5)
+    parser.add_argument("--co2-anchor-year", type=int, default=2023)
+    parser.add_argument(
+        "--min-start-co2-growth",
+        type=float,
+        default=0.0,
+        help=(
+            "Minimum national CO2 growth from anchor year to forecast start year. "
+            "0.0 means start-year CO2 must be >= anchor-year CO2."
+        ),
+    )
 
     args = parser.parse_args()
     return ForecastConfig(
@@ -1007,6 +1151,8 @@ def parse_args() -> ForecastConfig:
         train_end_year=args.train_end_year,
         national_validation_csv=args.national_validation_csv,
         calibration_year_window=args.calibration_year_window,
+        co2_anchor_year=args.co2_anchor_year,
+        min_start_co2_growth=args.min_start_co2_growth,
     )
 
 
@@ -1180,6 +1326,35 @@ def main() -> None:
     )
     forecast_df = apply_energy_calibration(forecast_df, factor=calib_factor)
 
+    co2_factor_raw, co2_calib_meta = estimate_co2_level_calibration_factor(
+        historical_df=panel_df,
+        anchor_year=cfg.co2_anchor_year,
+    )
+    # Energy has already been calibrated, so CO2-level calibration should
+    # remove that multiplier to avoid double scaling.
+    if calib_factor > 0.0 and np.isfinite(calib_factor):
+        co2_factor = co2_factor_raw / calib_factor
+    else:
+        co2_factor = co2_factor_raw
+
+    co2_calib_meta["raw_factor_before_energy_adjustment"] = co2_factor_raw
+    co2_calib_meta["energy_calibration_factor"] = calib_factor
+    co2_calib_meta["factor"] = co2_factor
+    co2_calib_meta["note"] = (
+        "CO2 factor adjusted by dividing energy calibration factor, "
+        "because energy_pred has already been scaled before CO2 calibration."
+    )
+
+    forecast_df = apply_co2_level_calibration(forecast_df, factor=co2_factor)
+
+    forecast_df, co2_floor_meta = enforce_start_year_co2_above_anchor(
+        forecast_df=forecast_df,
+        historical_df=panel_df,
+        start_year=cfg.start_year,
+        anchor_year=cfg.co2_anchor_year,
+        min_growth=cfg.min_start_co2_growth,
+    )
+
     peak_summary_df, national_df = summarize_peak(forecast_df, end_year=cfg.end_year)
 
     detail_path = cfg.output_dir / "scenario_forecast_detail.csv"
@@ -1215,6 +1390,8 @@ def main() -> None:
     payload = {
         "config": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(cfg).items()},
         "energy_calibration": calib_meta,
+        "co2_level_calibration": co2_calib_meta,
+        "co2_anchor_floor": co2_floor_meta,
         "constraint_report": constraint_report,
         "calibration_meta": calibration_meta_by_scenario,
         "scenarios": peak_summary_df.to_dict(orient="records"),
@@ -1236,6 +1413,9 @@ def main() -> None:
     print(f"Saved organized package dir: {organized['organized_dir']}")
     print(f"Saved organized combined table: {organized['combined_long']}")
     print(f"Applied energy calibration factor: {calib_factor:.6f}")
+    print(f"Applied CO2 level calibration factor: {co2_factor:.6f}")
+    print("CO2 anchor floor meta:")
+    print(json.dumps(co2_floor_meta, ensure_ascii=False, indent=2))
     print("\nPeak results:")
     print(peak_summary_df.to_string(index=False))
 

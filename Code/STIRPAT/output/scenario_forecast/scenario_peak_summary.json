@@ -10,7 +10,9 @@
     "window": 3,
     "train_end_year": 2020,
     "national_validation_csv": "C:\\Users\\LuoXue\\Desktop\\TJJM\\Code\\Preprocess\\output\\national_energy_validation.csv",
-    "calibration_year_window": 5
+    "calibration_year_window": 5,
+    "co2_anchor_year": 2023,
+    "min_start_co2_growth": 0.0
   },
   "energy_calibration": {
     "enabled": true,
@@ -19,6 +21,50 @@
     "year_min": 2019,
     "year_max": 2023,
     "sample_count": 5
+  },
+  "co2_level_calibration": {
+    "enabled": true,
+    "anchor_year": 2023,
+    "actual_co2": 11169.962000000001,
+    "ipcc_co2": 552877.4511721036,
+    "factor": 0.01451274477430473,
+    "raw_factor_before_energy_adjustment": 0.020203323496589726,
+    "energy_calibration_factor": 1.3921090607450317,
+    "note": "CO2 factor adjusted by dividing energy calibration factor, because energy_pred has already been scaled before CO2 calibration."
+  },
+  "co2_anchor_floor": {
+    "enabled": true,
+    "anchor_year": 2023,
+    "start_year": 2024,
+    "anchor_co2": 11169.962000000001,
+    "min_growth": 0.0,
+    "target_start_co2": 11169.962000000001,
+    "scenario_adjustments": {
+      "baseline": {
+        "start_co2_before": 11634.919089067207,
+        "start_co2_after": 11634.919089067207,
+        "multiplier": 1.0,
+        "reason": "already_above_anchor"
+      },
+      "extensive": {
+        "start_co2_before": 11239.86324348028,
+        "start_co2_after": 11239.86324348028,
+        "multiplier": 1.0,
+        "reason": "already_above_anchor"
+      },
+      "green_growth": {
+        "start_co2_before": 11664.420759631188,
+        "start_co2_after": 11664.420759631188,
+        "multiplier": 1.0,
+        "reason": "already_above_anchor"
+      },
+      "low_carbon": {
+        "start_co2_before": 11603.818184095006,
+        "start_co2_after": 11603.818184095006,
+        "multiplier": 1.0,
+        "reason": "already_above_anchor"
+      }
+    }
   },
   "constraint_report": {
     "baseline": [
@@ -828,28 +874,28 @@
     {
       "scenario": "baseline",
       "peak_year": 2030,
-      "peak_co2": 945329.697430219,
+      "peak_co2": 13719.328626375484,
       "peaked_within_horizon": true,
       "note": "已达峰"
     },
     {
       "scenario": "extensive",
       "peak_year": 2035,
-      "peak_co2": 1002044.8292604977,
+      "peak_co2": 14542.420859469365,
       "peaked_within_horizon": false,
       "note": "未在预测期内达峰"
     },
     {
       "scenario": "green_growth",
       "peak_year": 2030,
-      "peak_co2": 899803.7879799278,
+      "peak_co2": 13058.622721905298,
       "peaked_within_horizon": true,
       "note": "已达峰"
     },
     {
       "scenario": "low_carbon",
       "peak_year": 2029,
-      "peak_co2": 924522.8872703557,
+      "peak_co2": 13417.364700957976,
       "peaked_within_horizon": true,
       "note": "已达峰"
     }

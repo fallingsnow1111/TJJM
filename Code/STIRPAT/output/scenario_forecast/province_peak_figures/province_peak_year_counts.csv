@@ -1,0 +1,12 @@
+﻿scenario,peak_year,province_count
+baseline,2029,7
+baseline,2030,22
+baseline,2035,1
+extensive,2035,30
+green_growth,2027,11
+green_growth,2028,4
+green_growth,2029,2
+green_growth,2030,12
+green_growth,2035,1
+low_carbon,2029,29
+low_carbon,2035,1

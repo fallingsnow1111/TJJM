@@ -22,7 +22,3 @@
 - Jilin: mitigation_score=333.055, net_change=128.754
 - Chongqing: mitigation_score=305.005, net_change=134.588
 - Gansu: mitigation_score=204.048, net_change=157.224
-
-## Suggested figure use
-- Main text: stacked_timeseries.png, period_heatmap.png, region_stacked.png
-- Supplement: cumulative_waterfall.png, spatial_heterogeneity.png, province_quadrant.png
